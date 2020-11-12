@@ -6,6 +6,8 @@
 #include <cstdarg>
 #include <unordered_set>
 #include <sstream>
+#include <numeric>
+#include <functional>
 #pragma endregion
 
 #pragma region ChangeableMacros
@@ -15,9 +17,11 @@
 #pragma endregion
 
 #pragma region Constants
+constexpr bool kActionsDump = false;
 constexpr bool kShowHelloMessage = true;
 constexpr const char* kHelloMessage = "Кулити";
 constexpr size_t kIngredients = 4;
+constexpr size_t kInventoryCapacity = 10;
 #pragma endregion
 
 #pragma region DEBUGGER
@@ -159,7 +163,18 @@ struct PlayerInfo
     }
 };
 
-void ReadActions(std::vector<Action>& brews)
+void DumpActions(const std::vector<Action>& actions)
+{
+    if (kActionsDump)
+    {
+        for (auto& it : actions)
+        {
+            dbg.Print("Id: %d, type: %s, price: %d, castable: %d.\n", it.actionId, it.actionType.c_str(), it.price, it.castable);
+        }
+    }
+}
+
+void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::vector<Action>& opponent_casts)
 {
 	int actionCount;
 	std::cin >> actionCount;
@@ -167,19 +182,61 @@ void ReadActions(std::vector<Action>& brews)
 	actions.reserve(actionCount);
     std::generate_n(std::back_inserter(actions), actionCount, []() { return Action(std::cin); });
 
-    std::copy_if(actions.begin(), actions.end(), std::back_inserter(brews), [](const Action& obj) { return obj.actionType == "BREW"; });
+    DumpActions(actions);
 
-    ASSERT(actions.size() == brews.size(), "some action wasn't recognized");
+    std::copy_if(actions.begin(), actions.end(), std::back_inserter(brews), [](const Action& obj) { return obj.actionType == "BREW"; });
+    std::copy_if(actions.begin(), actions.end(), std::back_inserter(casts), [](const Action& obj) { return obj.actionType == "CAST"; });
+    std::copy_if(actions.begin(), actions.end(), std::back_inserter(opponent_casts), [](const Action& obj) { return obj.actionType == "OPPONENT_CAST"; });
+
+    ASSERT(actions.size() == brews.size() + casts.size() + opponent_casts.size(), "some action wasn't recognized");
 }
 
-bool CanBrewPotion(const Action& potion, int inv[])
+bool CanBrew(const Action& potion, int inv[])
 {
     bool ok = true;
     for (size_t i = 0; i < kIngredients; i++)
     {
         ok &= potion.delta[i] + inv[i] >= 0;
     }
-    return true;
+    return ok;
+}
+
+int VectorSum(const int arr[])
+{
+	return std::accumulate(arr, arr + kIngredients, 0);
+}
+
+bool CanCast(const Action& cast, int inv[])
+{
+	bool ok = true;
+	for (size_t i = 0; i < kIngredients; i++)
+	{
+		ok &= cast.delta[i] + inv[i] >= 0;
+	}
+	return ok && cast.castable && VectorSum(inv) + VectorSum(cast.delta) <= kInventoryCapacity;
+}
+
+int GetHighestTierMissingPotionIngredient(const Action& potion, int inv[])
+{
+	ASSERT(!CanBrew(potion, inv), "there must be a missing ingredient");
+	for (int i = kIngredients - 1; i >= 0; i--)
+	{
+		if (inv[i] + potion.delta[i] < 0)
+		{
+			return i;
+		}
+	}
+	ASSERT(false, "there must be a missing ingredient");
+}
+
+std::vector<Action> GetDoableRightNow(const std::vector<Action>& source, int inv[], 
+	std::function<bool(const Action& obj, int inv[])> canDo)
+{
+	auto doableRn = source;
+	doableRn.erase(std::remove_if(doableRn.begin(), doableRn.end(), [inv, canDo](const Action& obj) {
+		return !canDo(obj, inv);
+	}), doableRn.end());
+	return doableRn;
 }
 
 std::string& AppendHelloMessage(std::string& str, int moveNumber)
@@ -197,26 +254,54 @@ int main()
     {
 #pragma region Reading
         std::vector<Action> brews;
-        ReadActions(brews);
+        std::vector<Action> casts;
+        std::vector<Action> opponent_casts;
+        ReadActions(brews, casts, opponent_casts);
         auto localInfo = PlayerInfo(std::cin);
         auto enemyInfo = PlayerInfo(std::cin);
 #pragma endregion
-
+		
 #pragma region Logic
-		auto bestPotion = max_element(brews.begin(), brews.end(), [&localInfo](const Action& a, const Action& b) {
-			if (!CanBrewPotion(a, localInfo.inv))
-				return true;
-			if (!CanBrewPotion(b, localInfo.inv))
-				return false;
-			return a.price < b.price;
-		});
-#pragma endregion
+		std::string answer = "";
 
+		auto brewableRn = GetDoableRightNow(brews, localInfo.inv, CanBrew);
+		auto castableRn = GetDoableRightNow(casts, localInfo.inv, CanCast);
+
+		if (brewableRn.empty())
+		{
+			const auto& targetPotion = *max_element(brews.begin(), brews.end(), [](const Action& a, const Action& b) {
+				return a.price < b.price;
+			});
+
+			auto desiredIngredient = GetHighestTierMissingPotionIngredient(targetPotion, localInfo.inv);
+			do 
+			{
+				auto suitableCast = std::find_if(castableRn.begin(), castableRn.end(), [desiredIngredient](const Action& cast) {
+					return cast.delta[desiredIngredient] > 0;
+				});
+				if (suitableCast != castableRn.end())
+				{
+					answer = std::string("CAST ") + std::to_string(suitableCast->actionId);
+					goto submit;
+				}
+			} while (--desiredIngredient >= 0);
+		}
+		else
+		{
+			const auto& bestPotion = *max_element(brewableRn.begin(), brewableRn.end(), [](const Action& a, const Action& b) {
+				return a.price < b.price;
+			});
+			answer = std::string("BREW ") + std::to_string(bestPotion.actionId);
+			goto submit;
+		}
+		answer = "REST";
+
+#pragma endregion
+		
 #pragma region Submitting
+		submit:
         // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-//         std::cout << "BREW " << bestPotion->actionId << std::endl;
-        std::string outputAnswer = std::string("BREW ") + std::to_string(bestPotion->actionId);
-        std::cout << AppendHelloMessage(outputAnswer, moveNumber) << std::endl;
+        std::cout << AppendHelloMessage(answer, moveNumber) << std::endl;
 
         dbg.SummarizeAsserts();
 #pragma endregion

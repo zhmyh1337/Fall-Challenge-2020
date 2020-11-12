@@ -15,6 +15,8 @@
 #pragma endregion
 
 #pragma region Constants
+constexpr bool kShowHelloMessage = true;
+constexpr const char* kHelloMessage = "Кулити";
 constexpr size_t kIngredients = 4;
 #pragma endregion
 
@@ -180,9 +182,18 @@ bool CanBrewPotion(const Action& potion, int inv[])
     return true;
 }
 
+std::string& AppendHelloMessage(std::string& str, int moveNumber)
+{
+    if (moveNumber == 1 && kShowHelloMessage)
+    {
+        str.append(std::string(" ") + kHelloMessage);
+    }
+    return str;
+}
+
 int main()
 {
-    for (;;)
+    for (int moveNumber = 1; ; moveNumber++)
     {
 #pragma region Reading
         std::vector<Action> brews;
@@ -203,7 +214,9 @@ int main()
 
 #pragma region Submitting
         // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-        std::cout << "BREW " << bestPotion->actionId << std::endl;
+//         std::cout << "BREW " << bestPotion->actionId << std::endl;
+        std::string outputAnswer = std::string("BREW ") + std::to_string(bestPotion->actionId);
+        std::cout << AppendHelloMessage(outputAnswer, moveNumber) << std::endl;
 
         dbg.SummarizeAsserts();
 #pragma endregion

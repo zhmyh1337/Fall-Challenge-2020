@@ -8,6 +8,8 @@
 #include <sstream>
 #include <numeric>
 #include <functional>
+#include <random>
+#include <ctime>
 #pragma endregion
 
 #pragma region ChangeableMacros
@@ -19,9 +21,15 @@
 #pragma region Constants
 constexpr bool kActionsDump = false;
 constexpr bool kShowHelloMessage = true;
+constexpr bool kSing = true;
 constexpr const char* kHelloMessage = "Кулити";
 constexpr size_t kIngredients = 4;
 constexpr size_t kInventoryCapacity = 10;
+#pragma endregion
+
+#pragma region Globals
+std::mt19937 gRng(42);
+std::mt19937 gNotDetRng(time(0)); // not deterministic random (seeded with time)
 #pragma endregion
 
 #pragma region DEBUGGER
@@ -128,8 +136,180 @@ class DummyDebugger : public IDebugger
 #define ASSERT(...) ID(GET_MACRO(__VA_ARGS__, ASSERT_MESSAGE, ASSERT_SHORT)(__VA_ARGS__))
 #pragma endregion
 
-#pragma region UtilitiesStructures
+#pragma region Songs
+std::vector<const char*> gSongs[] = {
 
+	std::vector<const char*>
+	{
+		"We're no strangers to love",
+		"You know the rules and so do I",
+		"A full commitment's what I'm thinking of",
+		"You wouldn't get this from any other guy",
+		"I just wanna tell you how I'm feeling",
+		"Gotta make you understand",
+		"Never gonna give you up",
+		"Never gonna let you down",
+		"Never gonna run around and desert you",
+		"Never gonna make you cry",
+		"Never gonna say goodbye",
+		"Never gonna tell a lie and hurt you",
+		"We've known each other for so long",
+		"Your heart's been aching but you're too shy to say it",
+		"Inside we both know what's been going on",
+		"We know the game and we're gonna play it",
+		"And if you ask me how I'm feeling",
+		"Don't tell me you're too blind to see",
+		"Never gonna give you up",
+		"Never gonna let you down",
+		"Never gonna run around and desert you",
+		"Never gonna make you cry",
+		"Never gonna say goodbye",
+		"Never gonna tell a lie and hurt you",
+		"Never gonna give you up",
+		"Never gonna let you down",
+		"Never gonna run around and desert you",
+		"Never gonna make you cry",
+		"Never gonna say goodbye",
+		"Never gonna tell a lie and hurt you",
+		"Never gonna give, never gonna give",
+		"(Give you up)",
+		"(Ooh)Never gonna give, never gonna give",
+		"(Give you up)",
+		"We've known each other for so long",
+		"Your heart's been aching but you're too shy to say it",
+		"Inside we both know what's been going on",
+		"We know the game and we're gonna play it",
+		"I just wanna tell you how I'm feeling",
+		"Gotta make you understand",
+		"Never gonna give you up",
+		"Never gonna let you down",
+		"Never gonna run around and desert you",
+		"Never gonna make you cry",
+		"Never gonna say goodbye",
+		"Never gonna tell a lie and hurt you",
+		"Never gonna give you up",
+		"Never gonna let you down",
+		"Never gonna run around and desert you",
+		"Never gonna make you cry",
+		"Never gonna say goodbye",
+		"Never gonna tell a lie and hurt you",
+		"Never gonna give you up",
+		"Never gonna let you down",
+		"Never gonna run around and desert you",
+		"Never gonna make you cry",
+	},
+	std::vector<const char*>
+	{
+		"Somebody once told me the world is gonna roll me",
+		"I ain't the sharpest tool in the shed",
+		"She was looking kind of dumb with her finger and her thumb",
+		"In the shape of an \"L\" on her forehead",
+		"Well, the years start comingand they don't stop coming",
+		"Fed to the rules and I hit the ground running",
+		"Didn't make sense not to live for fun",
+		"Your brain gets smart but your head gets dumb",
+		"So much to do, so much to see",
+		"So what's wrong with taking the backstreets?",
+		"You'll never know if you don't go",
+		"You'll never shine if you don't glow",
+		"Hey now, you're an all star",
+		"Get your game on, go play",
+		"Hey now, you're a rock star",
+		"Get the show on, get paid",
+		"And all that glitters is gold",
+		"Only shooting stars break the mold",
+		"It's a cool place, and they say it gets colder",
+		"You're bundled up now, wait 'til you get older",
+		"But the meteor men beg to differ",
+		"Judging by the hole in the satellite picture",
+		"The ice we skate is getting pretty thin",
+		"The water's getting warm so you might as well swim",
+		"My world's on fire, how 'bout yours ?",
+		"That's the way I like it and I'll never get bored",
+		"Hey now, you're an all star",
+		"Get your game on, go play",
+		"Hey now, you're a rock star",
+		"Get the show on, get paid",
+		"All that glitters is gold",
+		"Only shooting stars break the mold",
+		"Somebody once asked",
+		"Could I spare some change for gas ?",
+		"\"I need to get myself away from this place\"",
+		"I said, \"Yep, what a concept",
+		"I could use a little fuel myself",
+		"And we could all use a little change\"",
+		"Well, the years start comingand they don't stop coming",
+		"Fed to the rules and I hit the ground running",
+		"Didn't make sense not to live for fun",
+		"Your brain gets smart but your head gets dumb",
+		"So much to do, so much to see",
+		"So what's wrong with taking the backstreets?",
+		"You'll never know if you don't go(go!)",
+		"You'll never shine if you don't glow",
+		"Hey now, you're an all star",
+		"Get your game on, go play",
+		"Hey now, you're a rock star",
+		"Get the show on, get paid",
+		"And all that glitters is gold",
+		"Only shooting stars break the mold",
+		"Hey now",
+		"Hey now",
+		"Hey, hey, hey now",
+		"Hey now",
+		"Hey now, you're an all star",
+		"Hey now, you're an all star",
+		"Hey now, you're an all star",
+		"Only shooting stars break the mold",
+	},
+	std::vector<const char*>
+	{
+		"Yo listen up, here's the story",
+		"About a little guy that lives in a blue world",
+		"And all day and all night and everything he sees is just blue",
+		"Like him, insideand outside",
+		"Blue his house with a blue little window",
+		"And a blue Corvette",
+		"And everything is blue for him",
+		"And himselfand everybody around",
+		"'Cause he ain't got nobody to listen",
+		"I'm blue da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"I'm blue da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"I have a blue house with a blue window",
+		"Blue is the color of all that I wear",
+		"Blue are the streetsand all the trees are too",
+		"I have a girlfriendand she is so blue",
+		"Blue are the people here that walk around",
+		"Blue like my Corvette, it's in and outside",
+		"Blue are the words I say and what I think",
+		"Blue are the feelings that live inside me",
+		"I'm blue da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"I'm blue da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"I have a blue house with a blue window",
+		"Blue is the color of all that I wear",
+		"Blue are the streetsand all the trees are too",
+		"I have a girlfriendand she is so blue",
+		"Blue are the people here that walk around",
+		"Blue like my Corvette, it's in and outside",
+		"Blue are the words I say and what I think",
+		"Blue are the feelings that live inside me",
+		"I'm blue da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"I'm blue da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+	}
+};
+constexpr auto kSongsCount = sizeof(gSongs) / sizeof(*gSongs);
+int gSongId = gNotDetRng() % kSongsCount;
 #pragma endregion
 
 #pragma region LogicStructures
@@ -239,12 +419,22 @@ std::vector<Action> GetDoableRightNow(const std::vector<Action>& source, int inv
 	return doableRn;
 }
 
-std::string& AppendHelloMessage(std::string& str, int moveNumber)
+std::string& AppendMessage(std::string& str, int moveNumber)
 {
     if (moveNumber == 1 && kShowHelloMessage)
     {
         str.append(std::string(" ") + kHelloMessage);
     }
+	if (kSing)
+	{
+		try
+		{
+			str.append(std::string(" ") + gSongs[gSongId].at((moveNumber - kShowHelloMessage - 2) / 1));
+		}
+		catch (...)
+		{
+		}
+	}
     return str;
 }
 
@@ -301,7 +491,7 @@ int main()
 #pragma region Submitting
 		submit:
         // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-        std::cout << AppendHelloMessage(answer, moveNumber) << std::endl;
+        std::cout << AppendMessage(answer, moveNumber) << std::endl;
 
         dbg.SummarizeAsserts();
 #pragma endregion

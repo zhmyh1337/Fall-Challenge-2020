@@ -21,9 +21,11 @@
 
 #pragma region Constants
 constexpr bool kActionsDump = false;
+constexpr bool kTomeProfitDump = true;
+constexpr bool kEnemyCastsProfitDump = true;
 constexpr bool kShowHelloMessage = true;
 constexpr bool kSing = true;
-constexpr const char* kHelloMessage = "Êóëèòè";
+constexpr const char* kHelloMessage = "ÐšÑƒÐ»Ð¸Ñ‚Ð¸";
 constexpr size_t kIngredients = 4;
 constexpr size_t kInventoryCapacity = 10;
 #pragma endregion
@@ -437,41 +439,31 @@ struct PlayerInfo
 		in >> inv[0] >> inv[1] >> inv[2] >> inv[3] >> score;
 	}
 };
-#pragma endregion
 
-#pragma region Utilities
-class Submit
+class EnemyTracker
 {
 public:
-	static std::string Brew(const Action& brew/*, int bonus[2]*/)
+	bool UpdateBalance(int newBalance)
 	{
-// 		if (brew.position < 2)
-// 		{
-// 			bonusCountdown[brew.position]--;
-// 			if (bonusCountdown[0] <= 0)
-// 			{
-// 				bonusCountdown[0] = bonusCountdown[1];
-// 				bonusCountdown[1] = 0;
-// 				bonus[0] = 1;
-// 				bonus[1] = 0;
-// 			}
-// 
-// 			if (bonusCountdown[0] <= 0)
-// 			{
-// 				bonus[0] = 0;
-// 			}
-// 			if (bonusCountdown[1] <= 0)
-// 			{
-// 				bonus[1] = 0;
-// 			}
-// 		}
-
-		return std::string("BREW ") + std::to_string(brew.actionId);
+		if (_lastBalance != newBalance)
+		{
+			_doneBrews++;
+			_lastBalance = newBalance;
+			return true;
+		}
+		_lastBalance = newBalance;
+		return false;
 	}
+
+	int GetDoneBrews() const
+	{
+		return _doneBrews;
+	}
+
 private:
-// 	static int bonusCountdown[2];
+	int _lastBalance = 0;
+	int _doneBrews = 0;
 };
-// int Submit::bonusCountdown[2] = { 4, 4 };
 #pragma endregion
 
 #pragma region Predicates
@@ -563,6 +555,7 @@ std::string& AppendMessage(std::string& str, int moveNumber)
 
 void DumpActions(const std::vector<Action>& actions)
 {
+#if DEBUG
 	if (kActionsDump)
 	{
 		for (auto& it : actions)
@@ -571,6 +564,20 @@ void DumpActions(const std::vector<Action>& actions)
 				it.price, it.castable, it.repeatable);
 		}
 	}
+#endif
+}
+
+void DumpProfit(bool assertion, const std::vector<Action>& actions, const char* name)
+{
+#if DEBUG
+	if (assertion)
+	{
+		for (auto& it : actions)
+		{
+			dbg.Print("Profit of %s %d = %f.\n", name, it.actionId, CastProfit(it.delta));
+		}
+	}
+#endif
 }
 
 void ClassifyAction(const std::vector<Action>& source, std::vector<Action>& destination, const char* targetName)
@@ -605,6 +612,7 @@ void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::ve
 
 int main()
 {
+#if DEBUG
 	auto tomeProfit = std::vector<std::pair<float, IngredientsContainer>>(Deck::tome.size());
 	for (size_t i = 0; i < tomeProfit.size(); i++)
 	{
@@ -614,6 +622,7 @@ int main()
 	std::sort(tomeProfit.begin(), tomeProfit.end(), [](const auto& lhs, const auto& rhs) {
 		return lhs.first < rhs.first;
 	});
+#endif
 
 	dbg.Print("Preprocessing used %f ms.\n", 1000.0f * clock() / CLOCKS_PER_SEC);
     for (int moveNumber = 1; ; moveNumber++)
@@ -631,14 +640,25 @@ int main()
         auto localInfo = PlayerInfo(std::cin);
         auto enemyInfo = PlayerInfo(std::cin);
 #pragma endregion
+
+#pragma region DebugDumping
+		DumpProfit(kTomeProfitDump, learns, "tome");
+		DumpProfit(kEnemyCastsProfitDump, opponent_casts, "enemy cast");
+#pragma endregion
 		
 #pragma region Logic
 		std::string answer = "";
 
-// 		static int bonus[2] = { 3, 1 };
-// 		dbg.Print("Bonuses: %d %d.\n", bonus[0], bonus[1]);
-// 		brews[0].price += bonus[0];
-// 		brews[1].price += bonus[1];
+		static auto enemyTracker = EnemyTracker();
+		static auto myselfTracker = EnemyTracker();
+		if (enemyTracker.UpdateBalance(enemyInfo.score))
+		{
+			dbg.Print("Enemy brewed a potion.\n");
+		}
+		if (myselfTracker.UpdateBalance(localInfo.score))
+		{
+			dbg.Print("I brewed a potion.\n");
+		}
 
 		auto brewableRn = GetDoableRightNow(brews, localInfo.inv, CanBrew);
 		auto castableRn = GetDoableRightNow(casts, localInfo.inv, CanCast);
@@ -652,7 +672,7 @@ int main()
 			return a.price < b.price;
 		});
 
-		if (!learns.empty())
+		if (!learns.empty() && myselfTracker.GetDoneBrews() >= enemyTracker.GetDoneBrews())
 		{
 			answer = std::string("LEARN ") + std::to_string(learns.front().actionId);
 			goto submit;
@@ -684,11 +704,11 @@ int main()
 		}
 		else
 		{
-			answer = Submit::Brew(targetPotion/*, bonus*/);
+			answer = std::string("BREW ") + std::to_string(targetPotion.actionId);
 			goto submit;
 		}
-		answer = "REST";
 
+		answer = "REST";
 #pragma endregion
 		
 #pragma region Submitting

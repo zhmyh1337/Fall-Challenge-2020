@@ -349,12 +349,13 @@ void DumpActions(const std::vector<Action>& actions)
     {
         for (auto& it : actions)
         {
-            dbg.Print("Id: %d, type: %s, price: %d, castable: %d.\n", it.actionId, it.actionType.c_str(), it.price, it.castable);
+            dbg.Print("Id: %d, t: %s, p: %d, c: %d, r: %d.\n", it.actionId, it.actionType.c_str(), 
+				it.price, it.castable, it.repeatable);
         }
     }
 }
 
-void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::vector<Action>& opponent_casts)
+void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::vector<Action>& opponent_casts, std::vector<Action>& learns)
 {
 	int actionCount;
 	std::cin >> actionCount;
@@ -367,8 +368,10 @@ void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::ve
     std::copy_if(actions.begin(), actions.end(), std::back_inserter(brews), [](const Action& obj) { return obj.actionType == "BREW"; });
     std::copy_if(actions.begin(), actions.end(), std::back_inserter(casts), [](const Action& obj) { return obj.actionType == "CAST"; });
     std::copy_if(actions.begin(), actions.end(), std::back_inserter(opponent_casts), [](const Action& obj) { return obj.actionType == "OPPONENT_CAST"; });
+    std::copy_if(actions.begin(), actions.end(), std::back_inserter(learns), [](const Action& obj) { return obj.actionType == "LEARN"; });
 
-    ASSERT(actions.size() == brews.size() + casts.size() + opponent_casts.size(), "some action wasn't recognized");
+    ASSERT(actions.size() == brews.size() + casts.size() + opponent_casts.size() + learns.size(), "some action wasn't recognized");
+    ASSERT(brews.size() == 5);
 }
 
 bool CanBrew(const Action& potion, int inv[])
@@ -446,7 +449,8 @@ int main()
         std::vector<Action> brews;
         std::vector<Action> casts;
         std::vector<Action> opponent_casts;
-        ReadActions(brews, casts, opponent_casts);
+        std::vector<Action> learns;
+        ReadActions(brews, casts, opponent_casts, learns);
         auto localInfo = PlayerInfo(std::cin);
         auto enemyInfo = PlayerInfo(std::cin);
 #pragma endregion
@@ -454,15 +458,18 @@ int main()
 #pragma region Logic
 		std::string answer = "";
 
+		brews[0].price += 3;
+		brews[1].price += 1;
+
 		auto brewableRn = GetDoableRightNow(brews, localInfo.inv, CanBrew);
 		auto castableRn = GetDoableRightNow(casts, localInfo.inv, CanCast);
 
-		if (brewableRn.empty())
-		{
-			const auto& targetPotion = *max_element(brews.begin(), brews.end(), [](const Action& a, const Action& b) {
-				return a.price < b.price;
-			});
+		const auto& targetPotion = *max_element(brews.begin(), brews.end(), [](const Action& a, const Action& b) {
+			return a.price < b.price;
+		});
 
+		if (!CanBrew(targetPotion, localInfo.inv))
+		{
 			auto desiredIngredient = GetHighestTierMissingPotionIngredient(targetPotion, localInfo.inv);
 			do 
 			{
@@ -471,17 +478,14 @@ int main()
 				});
 				if (suitableCast != castableRn.end())
 				{
-					answer = std::string("CAST ") + std::to_string(suitableCast->actionId);
+					answer = std::string("CAST ") + std::to_string(suitableCast->actionId) + " 1";
 					goto submit;
 				}
 			} while (--desiredIngredient >= 0);
 		}
 		else
 		{
-			const auto& bestPotion = *max_element(brewableRn.begin(), brewableRn.end(), [](const Action& a, const Action& b) {
-				return a.price < b.price;
-			});
-			answer = std::string("BREW ") + std::to_string(bestPotion.actionId);
+			answer = std::string("BREW ") + std::to_string(targetPotion.actionId);
 			goto submit;
 		}
 		answer = "REST";

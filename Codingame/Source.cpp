@@ -10,6 +10,7 @@
 #include <functional>
 #include <random>
 #include <ctime>
+#include <array>
 #pragma endregion
 
 #pragma region ChangeableMacros
@@ -27,13 +28,107 @@ constexpr size_t kIngredients = 4;
 constexpr size_t kInventoryCapacity = 10;
 #pragma endregion
 
+#pragma region Usings
+using IngredientsContainer = std::array<int, kIngredients>;
+#pragma endregion
+
 #pragma region Globals
 std::mt19937 gRng(42);
-std::mt19937 gNotDetRng(time(0)); // not deterministic random (seeded with time)
+std::mt19937 gNotDetRng((size_t)time(0)); // not deterministic random (seeded with time)
+float gIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
+#pragma endregion
+
+#pragma region Hardcode
+namespace Deck
+{
+	std::vector<IngredientsContainer> tome = {
+		{-3, 0, 0, 1},
+		{3, 0, -1, 0},
+		{1, 0, 1, 0},
+		{0, 1, 0, 0},
+		{3, 0, 0, 0},
+		{2, -2, 3, 0},
+		{2, -2, 1, 1},
+		{3, 1, 0, -1},
+		{3, 1, -2, 0},
+		{2, 2, -3, 0},
+		{2, 0, 2, -1},
+		{-4, 2, 0, 0},
+		{2, 0, 1, 0},
+		{4, 0, 0, 0},
+		{0, 0, 0, 1},
+		{0, 0, 2, 0},
+		{1, 1, 0, 0},
+		{-2, 1, 0, 0},
+		{-1, 0, -1, 1},
+		{0, -1, 2, 0},
+		{2, 0, -2, 1},
+		{-3, 1, 1, 0},
+		{0, -2, 2, 1},
+		{1, 1, -3, 1},
+		{0, 0, 3, -1},
+		{0, 0, -3, 2},
+		{1, 1, 1, -1},
+		{1, -1, 2, 0},
+		{4, -1, 1, 0},
+		{-5, 0, 0, 2},
+		{-4, 1, 0, 1},
+		{0, 2, 3, -2},
+		{1, 3, 1, -2},
+		{-5, 3, 0, 0},
+		{-2, -1, 0, 2},
+		{0, -3, 0, 3},
+		{0, 3, -3, 0},
+		{-3, 0, 3, 0},
+		{-2, 0, 2, 0},
+		{0, -2, 0, 2},
+		{0, 2, -2, 0},
+		{0, 2, 0, -1},
+	};
+
+	std::vector<std::pair<IngredientsContainer, int>> orders = {
+		std::make_pair(IngredientsContainer{2, 0, 2, 0}, 6),
+		std::make_pair(IngredientsContainer{3, 0, 2, 0}, 7),
+		std::make_pair(IngredientsContainer{0, 0, 4, 0}, 8),
+		std::make_pair(IngredientsContainer{2, 2, 0, 0}, 8),
+		std::make_pair(IngredientsContainer{2, 0, 3, 0}, 8),
+		std::make_pair(IngredientsContainer{3, 2, 0, 0}, 9),
+		std::make_pair(IngredientsContainer{0, 2, 2, 0}, 10),
+		std::make_pair(IngredientsContainer{0, 0, 5, 0}, 10),
+		std::make_pair(IngredientsContainer{2, 0, 0, 2}, 10),
+		std::make_pair(IngredientsContainer{2, 3, 0, 0}, 11),
+		std::make_pair(IngredientsContainer{3, 0, 0, 2}, 11),
+		std::make_pair(IngredientsContainer{0, 4, 0, 0}, 12),
+		std::make_pair(IngredientsContainer{0, 0, 2, 2}, 12),
+		std::make_pair(IngredientsContainer{0, 2, 3, 0}, 12),
+		std::make_pair(IngredientsContainer{0, 3, 2, 0}, 13),
+		std::make_pair(IngredientsContainer{0, 2, 0, 2}, 14),
+		std::make_pair(IngredientsContainer{0, 0, 3, 2}, 14),
+		std::make_pair(IngredientsContainer{2, 0, 0, 3}, 14),
+		std::make_pair(IngredientsContainer{0, 5, 0, 0}, 15),
+		std::make_pair(IngredientsContainer{0, 0, 0, 4}, 16),
+		std::make_pair(IngredientsContainer{0, 0, 2, 3}, 16),
+		std::make_pair(IngredientsContainer{0, 3, 0, 2}, 17),
+		std::make_pair(IngredientsContainer{0, 2, 0, 3}, 18),
+		std::make_pair(IngredientsContainer{0, 0, 0, 5}, 20),
+		std::make_pair(IngredientsContainer{2, 0, 1, 1}, 9),
+		std::make_pair(IngredientsContainer{0, 1, 2, 1}, 12),
+		std::make_pair(IngredientsContainer{1, 2, 0, 1}, 12),
+		std::make_pair(IngredientsContainer{2, 2, 2, 0}, 13),
+		std::make_pair(IngredientsContainer{2, 0, 2, 2}, 15),
+		std::make_pair(IngredientsContainer{2, 2, 0, 2}, 17),
+		std::make_pair(IngredientsContainer{0, 2, 2, 2}, 19),
+		std::make_pair(IngredientsContainer{1, 1, 1, 1}, 12),
+		std::make_pair(IngredientsContainer{3, 1, 1, 1}, 14),
+		std::make_pair(IngredientsContainer{1, 1, 3, 1}, 16),
+		std::make_pair(IngredientsContainer{1, 3, 1, 1}, 18),
+		std::make_pair(IngredientsContainer{1, 1, 1, 3}, 20),
+	};
+}
 #pragma endregion
 
 #pragma region DEBUGGER
-#if DEBUG_ACTIVE and (defined(DEBUG) or DEBUG_IN_RELEASE)
+#if DEBUG_ACTIVE and (defined(_DEBUG) or DEBUG_IN_RELEASE)
 #define DEBUG 1
 #else
 #define DEBUG 0
@@ -317,7 +412,7 @@ struct Action
 {
 	int actionId; // the unique ID of this spell or recipe
 	std::string actionType; // in the first league: BREW; later: CAST, OPPONENT_CAST, LEARN, BREW
-    int delta[kIngredients]; // by-tier ingredient change
+    std::array<int, kIngredients> delta; // by-tier ingredient change
 	int price; // the price in rupees if this is a potion
 	int tomeIndex; // in the first two leagues: always 0; later: the index in the tome if this is a tome spell, equal to the read-ahead tax
 	int taxCount; // in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell
@@ -330,18 +425,57 @@ struct Action
             price >> tomeIndex >> taxCount >> castable >> repeatable;
     }
 };
-#pragma endregion
 
 struct PlayerInfo
 {
-    int inv[kIngredients]; // by-tier ingredients in inventory
-    int score; // amount of rupees
+	std::array<int, kIngredients> inv; // by-tier ingredients in inventory
+	int score; // amount of rupees
 
-    PlayerInfo(std::istream& in)
-    {
-        in >> inv[0] >> inv[1] >> inv[2] >> inv[3] >> score;
-    }
+	PlayerInfo(std::istream& in)
+	{
+		in >> inv[0] >> inv[1] >> inv[2] >> inv[3] >> score;
+	}
 };
+#pragma endregion
+
+#pragma region Utilities
+class Submit
+{
+public:
+	static std::string Brew(int brewId, const std::vector<Action>& brews, int bonus[2])
+	{
+		auto brewPosition = std::find_if(brews.begin(), brews.end(), [brewId](const Action& brew) { return brew.actionId == brewId; });
+		ASSERT(brewPosition != brews.end());
+		size_t brewPositionIndex = brewPosition - brews.begin();
+
+		if (brewPositionIndex < 2)
+		{
+			bonusCountdown[brewPositionIndex]--;
+			if (bonusCountdown[0] <= 0)
+			{
+				bonusCountdown[0] = bonusCountdown[1];
+				bonusCountdown[1] = 0;
+				bonus[0] = 1;
+				bonus[1] = 0;
+			}
+
+			if (bonusCountdown[0] <= 0)
+			{
+				bonus[0] = 0;
+			}
+			if (bonusCountdown[1] <= 0)
+			{
+				bonus[1] = 0;
+			}
+		}
+
+		return std::string("BREW ") + std::to_string(brewId);
+	}
+private:
+	static int bonusCountdown[2];
+};
+int Submit::bonusCountdown[2] = { 4, 4 };
+#pragma endregion
 
 void DumpActions(const std::vector<Action>& actions)
 {
@@ -374,7 +508,7 @@ void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::ve
     ASSERT(brews.size() == 5);
 }
 
-bool CanBrew(const Action& potion, int inv[])
+bool CanBrew(const Action& potion, const IngredientsContainer& inv)
 {
     bool ok = true;
     for (size_t i = 0; i < kIngredients; i++)
@@ -384,22 +518,29 @@ bool CanBrew(const Action& potion, int inv[])
     return ok;
 }
 
-int VectorSum(const int arr[])
+int ArraySum(const IngredientsContainer& arr)
 {
-	return std::accumulate(arr, arr + kIngredients, 0);
+	return std::accumulate(arr.begin(), arr.end(), 0);
 }
 
-bool CanCast(const Action& cast, int inv[])
+bool CheckRepeatable(const IngredientsContainer& arr)
+{
+	return std::any_of(arr.begin(), arr.end(), [](const int x) { return x < 0; });
+}
+
+bool CanCast(const Action& cast, const IngredientsContainer& inv)
 {
 	bool ok = true;
 	for (size_t i = 0; i < kIngredients; i++)
 	{
 		ok &= cast.delta[i] + inv[i] >= 0;
 	}
-	return ok && cast.castable && VectorSum(inv) + VectorSum(cast.delta) <= kInventoryCapacity;
+	return ok && cast.castable && ArraySum(inv) + ArraySum(cast.delta) <= kInventoryCapacity;
 }
 
-int GetHighestTierMissingPotionIngredient(const Action& potion, int inv[])
+#pragma warning(push)
+#pragma warning(disable : 4715)
+int GetHighestTierMissingPotionIngredient(const Action& potion, const IngredientsContainer& inv)
 {
 	ASSERT(!CanBrew(potion, inv), "there must be a missing ingredient");
 	for (int i = kIngredients - 1; i >= 0; i--)
@@ -411,9 +552,10 @@ int GetHighestTierMissingPotionIngredient(const Action& potion, int inv[])
 	}
 	ASSERT(false, "there must be a missing ingredient");
 }
+#pragma warning(pop)
 
-std::vector<Action> GetDoableRightNow(const std::vector<Action>& source, int inv[], 
-	std::function<bool(const Action& obj, int inv[])> canDo)
+std::vector<Action> GetDoableRightNow(const std::vector<Action>& source, const IngredientsContainer& inv, 
+	std::function<bool(const Action& obj, const IngredientsContainer& inv)> canDo)
 {
 	auto doableRn = source;
 	doableRn.erase(std::remove_if(doableRn.begin(), doableRn.end(), [inv, canDo](const Action& obj) {
@@ -443,8 +585,32 @@ std::string& AppendMessage(std::string& str, int moveNumber)
 
 int main()
 {
+	auto toLearningProfit = [](const IngredientsContainer x) {
+		float result = 0.0f;
+		for (size_t i = 0; i < kIngredients; i++)
+		{
+			result += x[i] * gIngredientCost[i];
+		}
+		return result;
+	};
+
+	auto tomeProfit = std::vector<std::pair<float, IngredientsContainer>>(Deck::tome.size());
+	for (size_t i = 0; i < tomeProfit.size(); i++)
+	{
+		tomeProfit[i] = std::make_pair(toLearningProfit(Deck::tome[i]), Deck::tome[i]);
+	}
+
+	std::sort(tomeProfit.begin(), tomeProfit.end(), [](const auto& lhs, const auto& rhs) {
+		return lhs.first < rhs.first;
+	});
+
+	dbg.Print("Preprocessing used %f ms.\n", 1000.0f * clock() / CLOCKS_PER_SEC);
     for (int moveNumber = 1; ; moveNumber++)
     {
+#if DEBUG
+		clock_t startTime = clock();
+#endif
+
 #pragma region Reading
         std::vector<Action> brews;
         std::vector<Action> casts;
@@ -458,11 +624,18 @@ int main()
 #pragma region Logic
 		std::string answer = "";
 
-		brews[0].price += 3;
-		brews[1].price += 1;
+		static int bonus[2] = { 3, 1 };
+		dbg.Print("Bonuses: %d %d.\n", bonus[0], bonus[1]);
+		brews[0].price += bonus[0];
+		brews[1].price += bonus[1];
 
 		auto brewableRn = GetDoableRightNow(brews, localInfo.inv, CanBrew);
 		auto castableRn = GetDoableRightNow(casts, localInfo.inv, CanCast);
+
+		std::sort(brews.begin(), brews.end(), [](const Action& lhs, const Action& rhs) {
+			// Descending!
+			return ArraySum(lhs.delta) > ArraySum(rhs.delta);
+		});
 
 		const auto& targetPotion = *max_element(brews.begin(), brews.end(), [](const Action& a, const Action& b) {
 			return a.price < b.price;
@@ -485,7 +658,7 @@ int main()
 		}
 		else
 		{
-			answer = std::string("BREW ") + std::to_string(targetPotion.actionId);
+			answer = Submit::Brew(targetPotion.actionId, brews, bonus);
 			goto submit;
 		}
 		answer = "REST";
@@ -497,7 +670,13 @@ int main()
         // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
         std::cout << AppendMessage(answer, moveNumber) << std::endl;
 
+#if DEBUG
         dbg.SummarizeAsserts();
+		float curTime = 1000.0f * (clock() - startTime) / CLOCKS_PER_SEC;
+		static float maxTime = 0.0;
+		maxTime = std::max(maxTime, curTime);
+		dbg.Print("Used %f ms. Max used %f ms.\n", curTime, maxTime);
+#endif
 #pragma endregion
     }
 }

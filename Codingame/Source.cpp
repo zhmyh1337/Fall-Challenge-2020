@@ -20,7 +20,7 @@
 #pragma endregion
 
 #pragma region Constants
-constexpr bool kActionsDump = false;
+constexpr bool kActionsDump = true;
 constexpr bool kShowHelloMessage = true;
 constexpr bool kSing = true;
 constexpr const char* kHelloMessage = "Кулити";
@@ -418,6 +418,7 @@ struct Action
 	int taxCount; // in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell
 	bool castable; // in the first league: always 0; later: 1 if this is a castable player spell
 	bool repeatable; // for the first two leagues: always 0; later: 1 if this is a repeatable player spell
+	int position = -1; // index in vector
 
     Action(std::istream& in)
     {
@@ -442,15 +443,11 @@ struct PlayerInfo
 class Submit
 {
 public:
-	static std::string Brew(int brewId, const std::vector<Action>& brews, int bonus[2])
+	static std::string Brew(const Action& brew, int bonus[2])
 	{
-		auto brewPosition = std::find_if(brews.begin(), brews.end(), [brewId](const Action& brew) { return brew.actionId == brewId; });
-		ASSERT(brewPosition != brews.end());
-		size_t brewPositionIndex = brewPosition - brews.begin();
-
-		if (brewPositionIndex < 2)
+		if (brew.position < 2)
 		{
-			bonusCountdown[brewPositionIndex]--;
+			bonusCountdown[brew.position]--;
 			if (bonusCountdown[0] <= 0)
 			{
 				bonusCountdown[0] = bonusCountdown[1];
@@ -469,7 +466,7 @@ public:
 			}
 		}
 
-		return std::string("BREW ") + std::to_string(brewId);
+		return std::string("BREW ") + std::to_string(brew.actionId);
 	}
 private:
 	static int bonusCountdown[2];
@@ -477,37 +474,7 @@ private:
 int Submit::bonusCountdown[2] = { 4, 4 };
 #pragma endregion
 
-void DumpActions(const std::vector<Action>& actions)
-{
-    if (kActionsDump)
-    {
-        for (auto& it : actions)
-        {
-            dbg.Print("Id: %d, t: %s, p: %d, c: %d, r: %d.\n", it.actionId, it.actionType.c_str(), 
-				it.price, it.castable, it.repeatable);
-        }
-    }
-}
-
-void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::vector<Action>& opponent_casts, std::vector<Action>& learns)
-{
-	int actionCount;
-	std::cin >> actionCount;
-	auto actions = std::vector<Action>();
-	actions.reserve(actionCount);
-    std::generate_n(std::back_inserter(actions), actionCount, []() { return Action(std::cin); });
-
-    DumpActions(actions);
-
-    std::copy_if(actions.begin(), actions.end(), std::back_inserter(brews), [](const Action& obj) { return obj.actionType == "BREW"; });
-    std::copy_if(actions.begin(), actions.end(), std::back_inserter(casts), [](const Action& obj) { return obj.actionType == "CAST"; });
-    std::copy_if(actions.begin(), actions.end(), std::back_inserter(opponent_casts), [](const Action& obj) { return obj.actionType == "OPPONENT_CAST"; });
-    std::copy_if(actions.begin(), actions.end(), std::back_inserter(learns), [](const Action& obj) { return obj.actionType == "LEARN"; });
-
-    ASSERT(actions.size() == brews.size() + casts.size() + opponent_casts.size() + learns.size(), "some action wasn't recognized");
-    ASSERT(brews.size() == 5);
-}
-
+#pragma region Predicates
 bool CanBrew(const Action& potion, const IngredientsContainer& inv)
 {
     bool ok = true;
@@ -537,6 +504,17 @@ bool CanCast(const Action& cast, const IngredientsContainer& inv)
 	}
 	return ok && cast.castable && ArraySum(inv) + ArraySum(cast.delta) <= kInventoryCapacity;
 }
+
+float CastProfit(const IngredientsContainer& cast)
+{
+	float result = 0.0f;
+	for (size_t i = 0; i < cast.size(); i++)
+	{
+		result += cast[i] * gIngredientCost[i];
+	}
+	return result;
+}
+#pragma endregion
 
 #pragma warning(push)
 #pragma warning(disable : 4715)
@@ -583,21 +561,58 @@ std::string& AppendMessage(std::string& str, int moveNumber)
     return str;
 }
 
+void DumpActions(const std::vector<Action>& actions)
+{
+	if (kActionsDump)
+	{
+		for (auto& it : actions)
+		{
+			dbg.Print("Id: %d, t: %s, p: %d, c: %d, r: %d.\n", it.actionId, it.actionType.c_str(),
+				it.price, it.castable, it.repeatable);
+			if (it.actionType == "LEARN")
+			{
+				dbg.Print("Profit: %f.\n", CastProfit(it.delta));
+			}
+		}
+	}
+}
+
+void ClassifyAction(const std::vector<Action>& source, std::vector<Action>& destination, const char* targetName)
+{
+	std::copy_if(source.begin(), source.end(), std::back_inserter(destination), [targetName](const Action& obj) {
+		return obj.actionType == targetName;
+	});
+	for (size_t i = 0; i < destination.size(); i++)
+	{
+		destination[i].position = i;
+	}
+}
+
+void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::vector<Action>& opponent_casts, std::vector<Action>& learns)
+{
+	int actionCount;
+	std::cin >> actionCount;
+	auto actions = std::vector<Action>();
+	actions.reserve(actionCount);
+	std::generate_n(std::back_inserter(actions), actionCount, []() { return Action(std::cin); });
+
+	DumpActions(actions);
+
+	ClassifyAction(actions, brews, "BREW");
+	ClassifyAction(actions, casts, "CAST");
+	ClassifyAction(actions, opponent_casts, "OPPONENT_CAST");
+	ClassifyAction(actions, learns, "LEARN");
+
+	ASSERT(actions.size() == brews.size() + casts.size() + opponent_casts.size() + learns.size(), "some action wasn't recognized");
+	ASSERT(brews.size() == 5);
+}
+
 int main()
 {
-	auto toLearningProfit = [](const IngredientsContainer x) {
-		float result = 0.0f;
-		for (size_t i = 0; i < kIngredients; i++)
-		{
-			result += x[i] * gIngredientCost[i];
-		}
-		return result;
-	};
-
 	auto tomeProfit = std::vector<std::pair<float, IngredientsContainer>>(Deck::tome.size());
 	for (size_t i = 0; i < tomeProfit.size(); i++)
 	{
-		tomeProfit[i] = std::make_pair(toLearningProfit(Deck::tome[i]), Deck::tome[i]);
+		tomeProfit[i] = std::make_pair(CastProfit(Deck::tome[i]), Deck::tome[i]);
 	}
 
 	std::sort(tomeProfit.begin(), tomeProfit.end(), [](const auto& lhs, const auto& rhs) {
@@ -658,7 +673,7 @@ int main()
 		}
 		else
 		{
-			answer = Submit::Brew(targetPotion.actionId, brews, bonus);
+			answer = Submit::Brew(targetPotion, bonus);
 			goto submit;
 		}
 		answer = "REST";

@@ -21,22 +21,21 @@
 
 #pragma region Constants
 constexpr bool kActionsDump = false;
-constexpr bool kTomeProfitDump = true;
-constexpr bool kEnemyCastsProfitDump = true;
+constexpr bool kTomeProfitDump = false;
+constexpr bool kEnemyCastsProfitDump = false;
 constexpr bool kShowHelloMessage = true;
 constexpr bool kSing = true;
 constexpr const char* kHelloMessage = "Кулити";
 constexpr size_t kIngredients = 4;
 constexpr size_t kInventoryCapacity = 10;
+constexpr int kStopLearningAfter = 11;
 #pragma endregion
 
-#pragma region Usings
 using IngredientsContainer = std::array<int, kIngredients>;
-#pragma endregion
 
 #pragma region Globals
 std::mt19937 gRng(42);
-std::mt19937 gNotDetRng((size_t)time(0)); // not deterministic random (seeded with time)
+std::mt19937 gNotDetRng((uint32_t)time(0)); // not deterministic random (seeded with time)
 float gIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
 #pragma endregion
 
@@ -129,101 +128,101 @@ namespace Deck
 }
 #pragma endregion
 
-#pragma region DEBUGGER
+#pragma region Debugger
 #if DEBUG_ACTIVE and (defined(_DEBUG) or DEBUG_IN_RELEASE)
-#define DEBUG 1
+	#define DEBUG 1
 #else
-#define DEBUG 0
+	#define DEBUG 0
 #endif
 
 class IDebugger
 {
 public:
-    virtual void Assert(bool assertion, int line, const char* expr, const char* message = nullptr) = 0;
-    virtual void SummarizeAsserts() = 0;
-    virtual void Print(const char* message, ...) = 0;
-    virtual void NewLine() = 0;
-    virtual void Separator() = 0;
+	virtual void Assert(bool assertion, int line, const char* expr, const char* message = nullptr) = 0;
+	virtual void SummarizeAsserts() = 0;
+	virtual void Print(const char* message, ...) = 0;
+	virtual void NewLine() = 0;
+	virtual void Separator() = 0;
 };
 
 class Debugger : public IDebugger
 {
-    void Assert(bool assertion, int line, const char* expr, const char* message) override
-    {
-#if ASSERTS_ACTIVE
-        if (!assertion)
-        {
-            std::ostringstream ss;
-            ss << "[Line " << line << "]: " << expr;
-            if (message)
-            {
-                ss << " (" << message << ")";
-            }
-            ss << ".\n";
+	void Assert(bool assertion, int line, const char* expr, const char* message) override
+	{
+		#if ASSERTS_ACTIVE
+		if (!assertion)
+		{
+			std::ostringstream ss;
+			ss << "[Line " << line << "]: " << expr;
+			if (message)
+			{
+				ss << " (" << message << ")";
+			}
+			ss << ".\n";
 
-            Print(ss.str().c_str());
-            _caughtAssertions.insert(std::string("~") + ss.str());
-        }
-#endif
-    }
+			Print(ss.str().c_str());
+			_caughtAssertions.insert(std::string("~") + ss.str());
+		}
+		#endif
+	}
 
-    void SummarizeAsserts() override
-    {
-        if (!_caughtAssertions.empty())
-        {
-            Print("~Caught assertions:\n");
-            for (auto& it : _caughtAssertions)
-            {
-                Print(it.c_str());
-            }
-        }
-    }
+	void SummarizeAsserts() override
+	{
+		if (!_caughtAssertions.empty())
+		{
+			Print("~Caught assertions:\n");
+			for (auto& it : _caughtAssertions)
+			{
+				Print(it.c_str());
+			}
+		}
+	}
 
-    void Print(const char* message, ...) override
-    {
-        va_list argptr;
-        va_start(argptr, message);
-        vfprintf(stderr, message, argptr);
-        va_end(argptr);
-    }
+	void Print(const char* message, ...) override
+	{
+		va_list argptr;
+		va_start(argptr, message);
+		vfprintf(stderr, message, argptr);
+		va_end(argptr);
+	}
 
-    void NewLine() override
-    {
-        Print("\n");
-    }
+	void NewLine() override
+	{
+		Print("\n");
+	}
 
-    void Separator() override
-    {
-        Print("========================\n");
-    }
+	void Separator() override
+	{
+		Print("========================\n");
+	}
 
 private:
-    std::unordered_set<std::string> _caughtAssertions;
+	std::unordered_set<std::string> _caughtAssertions;
 };
 
 class DummyDebugger : public IDebugger
 {
-    void Assert(bool assertion, int line, const char* expr, const char* message = nullptr) override
-    {
-    }
-    void Print(const char* message, ...) override
-    {
-    }
-    void NewLine() override
-    {
-    }
-    void Separator() override
-    {
-    }
-    void SummarizeAsserts() override
-    {
-    }
+	void Assert(bool assertion, int line, const char* expr, const char* message = nullptr) override
+	{
+	}
+	void Print(const char* message, ...) override
+	{
+	}
+	void NewLine() override
+	{
+	}
+	void Separator() override
+	{
+	}
+	void SummarizeAsserts() override
+	{
+	}
 };
 
 #if DEBUG
-    IDebugger& dbg = *new Debugger();
+IDebugger& dbg = *new Debugger();
 #else
-    IDebugger& dbg = *new DummyDebugger();
+IDebugger& dbg = *new DummyDebugger();
 #endif
 
 #define ASSERT_SHORT(expr) dbg.Assert(!!(expr), __LINE__, #expr)
@@ -234,187 +233,190 @@ class DummyDebugger : public IDebugger
 #pragma endregion
 
 #pragma region Songs
-std::vector<const char*> gSongs[] = {
+namespace Songs
+{
+	std::vector<const char*> songsList[] = {
 
-	std::vector<const char*>
-	{
-		"We're no strangers to love",
-		"You know the rules and so do I",
-		"A full commitment's what I'm thinking of",
-		"You wouldn't get this from any other guy",
-		"I just wanna tell you how I'm feeling",
-		"Gotta make you understand",
-		"Never gonna give you up",
-		"Never gonna let you down",
-		"Never gonna run around and desert you",
-		"Never gonna make you cry",
-		"Never gonna say goodbye",
-		"Never gonna tell a lie and hurt you",
-		"We've known each other for so long",
-		"Your heart's been aching but you're too shy to say it",
-		"Inside we both know what's been going on",
-		"We know the game and we're gonna play it",
-		"And if you ask me how I'm feeling",
-		"Don't tell me you're too blind to see",
-		"Never gonna give you up",
-		"Never gonna let you down",
-		"Never gonna run around and desert you",
-		"Never gonna make you cry",
-		"Never gonna say goodbye",
-		"Never gonna tell a lie and hurt you",
-		"Never gonna give you up",
-		"Never gonna let you down",
-		"Never gonna run around and desert you",
-		"Never gonna make you cry",
-		"Never gonna say goodbye",
-		"Never gonna tell a lie and hurt you",
-		"Never gonna give, never gonna give",
-		"(Give you up)",
-		"(Ooh)Never gonna give, never gonna give",
-		"(Give you up)",
-		"We've known each other for so long",
-		"Your heart's been aching but you're too shy to say it",
-		"Inside we both know what's been going on",
-		"We know the game and we're gonna play it",
-		"I just wanna tell you how I'm feeling",
-		"Gotta make you understand",
-		"Never gonna give you up",
-		"Never gonna let you down",
-		"Never gonna run around and desert you",
-		"Never gonna make you cry",
-		"Never gonna say goodbye",
-		"Never gonna tell a lie and hurt you",
-		"Never gonna give you up",
-		"Never gonna let you down",
-		"Never gonna run around and desert you",
-		"Never gonna make you cry",
-		"Never gonna say goodbye",
-		"Never gonna tell a lie and hurt you",
-		"Never gonna give you up",
-		"Never gonna let you down",
-		"Never gonna run around and desert you",
-		"Never gonna make you cry",
-	},
-	std::vector<const char*>
-	{
-		"Somebody once told me the world is gonna roll me",
-		"I ain't the sharpest tool in the shed",
-		"She was looking kind of dumb with her finger and her thumb",
-		"In the shape of an \"L\" on her forehead",
-		"Well, the years start comingand they don't stop coming",
-		"Fed to the rules and I hit the ground running",
-		"Didn't make sense not to live for fun",
-		"Your brain gets smart but your head gets dumb",
-		"So much to do, so much to see",
-		"So what's wrong with taking the backstreets?",
-		"You'll never know if you don't go",
-		"You'll never shine if you don't glow",
-		"Hey now, you're an all star",
-		"Get your game on, go play",
-		"Hey now, you're a rock star",
-		"Get the show on, get paid",
-		"And all that glitters is gold",
-		"Only shooting stars break the mold",
-		"It's a cool place, and they say it gets colder",
-		"You're bundled up now, wait 'til you get older",
-		"But the meteor men beg to differ",
-		"Judging by the hole in the satellite picture",
-		"The ice we skate is getting pretty thin",
-		"The water's getting warm so you might as well swim",
-		"My world's on fire, how 'bout yours ?",
-		"That's the way I like it and I'll never get bored",
-		"Hey now, you're an all star",
-		"Get your game on, go play",
-		"Hey now, you're a rock star",
-		"Get the show on, get paid",
-		"All that glitters is gold",
-		"Only shooting stars break the mold",
-		"Somebody once asked",
-		"Could I spare some change for gas ?",
-		"\"I need to get myself away from this place\"",
-		"I said, \"Yep, what a concept",
-		"I could use a little fuel myself",
-		"And we could all use a little change\"",
-		"Well, the years start comingand they don't stop coming",
-		"Fed to the rules and I hit the ground running",
-		"Didn't make sense not to live for fun",
-		"Your brain gets smart but your head gets dumb",
-		"So much to do, so much to see",
-		"So what's wrong with taking the backstreets?",
-		"You'll never know if you don't go(go!)",
-		"You'll never shine if you don't glow",
-		"Hey now, you're an all star",
-		"Get your game on, go play",
-		"Hey now, you're a rock star",
-		"Get the show on, get paid",
-		"And all that glitters is gold",
-		"Only shooting stars break the mold",
-		"Hey now",
-		"Hey now",
-		"Hey, hey, hey now",
-		"Hey now",
-		"Hey now, you're an all star",
-		"Hey now, you're an all star",
-		"Hey now, you're an all star",
-		"Only shooting stars break the mold",
-	},
-	std::vector<const char*>
-	{
-		"Yo listen up, here's the story",
-		"About a little guy that lives in a blue world",
-		"And all day and all night and everything he sees is just blue",
-		"Like him, insideand outside",
-		"Blue his house with a blue little window",
-		"And a blue Corvette",
-		"And everything is blue for him",
-		"And himselfand everybody around",
-		"'Cause he ain't got nobody to listen",
-		"I'm blue da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"I'm blue da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"I have a blue house with a blue window",
-		"Blue is the color of all that I wear",
-		"Blue are the streetsand all the trees are too",
-		"I have a girlfriendand she is so blue",
-		"Blue are the people here that walk around",
-		"Blue like my Corvette, it's in and outside",
-		"Blue are the words I say and what I think",
-		"Blue are the feelings that live inside me",
-		"I'm blue da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"I'm blue da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"I have a blue house with a blue window",
-		"Blue is the color of all that I wear",
-		"Blue are the streetsand all the trees are too",
-		"I have a girlfriendand she is so blue",
-		"Blue are the people here that walk around",
-		"Blue like my Corvette, it's in and outside",
-		"Blue are the words I say and what I think",
-		"Blue are the feelings that live inside me",
-		"I'm blue da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"I'm blue da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-		"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
-	}
-};
-constexpr auto kSongsCount = sizeof(gSongs) / sizeof(*gSongs);
-int gSongId = gNotDetRng() % kSongsCount;
+		std::vector<const char*>
+		{
+			"We're no strangers to love",
+			"You know the rules and so do I",
+			"A full commitment's what I'm thinking of",
+			"You wouldn't get this from any other guy",
+			"I just wanna tell you how I'm feeling",
+			"Gotta make you understand",
+			"Never gonna give you up",
+			"Never gonna let you down",
+			"Never gonna run around and desert you",
+			"Never gonna make you cry",
+			"Never gonna say goodbye",
+			"Never gonna tell a lie and hurt you",
+			"We've known each other for so long",
+			"Your heart's been aching but you're too shy to say it",
+			"Inside we both know what's been going on",
+			"We know the game and we're gonna play it",
+			"And if you ask me how I'm feeling",
+			"Don't tell me you're too blind to see",
+			"Never gonna give you up",
+			"Never gonna let you down",
+			"Never gonna run around and desert you",
+			"Never gonna make you cry",
+			"Never gonna say goodbye",
+			"Never gonna tell a lie and hurt you",
+			"Never gonna give you up",
+			"Never gonna let you down",
+			"Never gonna run around and desert you",
+			"Never gonna make you cry",
+			"Never gonna say goodbye",
+			"Never gonna tell a lie and hurt you",
+			"Never gonna give, never gonna give",
+			"(Give you up)",
+			"(Ooh)Never gonna give, never gonna give",
+			"(Give you up)",
+			"We've known each other for so long",
+			"Your heart's been aching but you're too shy to say it",
+			"Inside we both know what's been going on",
+			"We know the game and we're gonna play it",
+			"I just wanna tell you how I'm feeling",
+			"Gotta make you understand",
+			"Never gonna give you up",
+			"Never gonna let you down",
+			"Never gonna run around and desert you",
+			"Never gonna make you cry",
+			"Never gonna say goodbye",
+			"Never gonna tell a lie and hurt you",
+			"Never gonna give you up",
+			"Never gonna let you down",
+			"Never gonna run around and desert you",
+			"Never gonna make you cry",
+			"Never gonna say goodbye",
+			"Never gonna tell a lie and hurt you",
+			"Never gonna give you up",
+			"Never gonna let you down",
+			"Never gonna run around and desert you",
+			"Never gonna make you cry",
+		},
+		std::vector<const char*>
+		{
+			"Somebody once told me the world is gonna roll me",
+			"I ain't the sharpest tool in the shed",
+			"She was looking kind of dumb with her finger and her thumb",
+			"In the shape of an \"L\" on her forehead",
+			"Well, the years start comingand they don't stop coming",
+			"Fed to the rules and I hit the ground running",
+			"Didn't make sense not to live for fun",
+			"Your brain gets smart but your head gets dumb",
+			"So much to do, so much to see",
+			"So what's wrong with taking the backstreets?",
+			"You'll never know if you don't go",
+			"You'll never shine if you don't glow",
+			"Hey now, you're an all star",
+			"Get your game on, go play",
+			"Hey now, you're a rock star",
+			"Get the show on, get paid",
+			"And all that glitters is gold",
+			"Only shooting stars break the mold",
+			"It's a cool place, and they say it gets colder",
+			"You're bundled up now, wait 'til you get older",
+			"But the meteor men beg to differ",
+			"Judging by the hole in the satellite picture",
+			"The ice we skate is getting pretty thin",
+			"The water's getting warm so you might as well swim",
+			"My world's on fire, how 'bout yours ?",
+			"That's the way I like it and I'll never get bored",
+			"Hey now, you're an all star",
+			"Get your game on, go play",
+			"Hey now, you're a rock star",
+			"Get the show on, get paid",
+			"All that glitters is gold",
+			"Only shooting stars break the mold",
+			"Somebody once asked",
+			"Could I spare some change for gas ?",
+			"\"I need to get myself away from this place\"",
+			"I said, \"Yep, what a concept",
+			"I could use a little fuel myself",
+			"And we could all use a little change\"",
+			"Well, the years start comingand they don't stop coming",
+			"Fed to the rules and I hit the ground running",
+			"Didn't make sense not to live for fun",
+			"Your brain gets smart but your head gets dumb",
+			"So much to do, so much to see",
+			"So what's wrong with taking the backstreets?",
+			"You'll never know if you don't go(go!)",
+			"You'll never shine if you don't glow",
+			"Hey now, you're an all star",
+			"Get your game on, go play",
+			"Hey now, you're a rock star",
+			"Get the show on, get paid",
+			"And all that glitters is gold",
+			"Only shooting stars break the mold",
+			"Hey now",
+			"Hey now",
+			"Hey, hey, hey now",
+			"Hey now",
+			"Hey now, you're an all star",
+			"Hey now, you're an all star",
+			"Hey now, you're an all star",
+			"Only shooting stars break the mold",
+		},
+		std::vector<const char*>
+		{
+			"Yo listen up, here's the story",
+			"About a little guy that lives in a blue world",
+			"And all day and all night and everything he sees is just blue",
+			"Like him, insideand outside",
+			"Blue his house with a blue little window",
+			"And a blue Corvette",
+			"And everything is blue for him",
+			"And himselfand everybody around",
+			"'Cause he ain't got nobody to listen",
+			"I'm blue da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"I'm blue da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"I have a blue house with a blue window",
+			"Blue is the color of all that I wear",
+			"Blue are the streetsand all the trees are too",
+			"I have a girlfriendand she is so blue",
+			"Blue are the people here that walk around",
+			"Blue like my Corvette, it's in and outside",
+			"Blue are the words I say and what I think",
+			"Blue are the feelings that live inside me",
+			"I'm blue da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"I'm blue da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"I have a blue house with a blue window",
+			"Blue is the color of all that I wear",
+			"Blue are the streetsand all the trees are too",
+			"I have a girlfriendand she is so blue",
+			"Blue are the people here that walk around",
+			"Blue like my Corvette, it's in and outside",
+			"Blue are the words I say and what I think",
+			"Blue are the feelings that live inside me",
+			"I'm blue da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"I'm blue da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+			"Da ba dee da ba daa, da ba dee da ba daa, da ba dee da ba daa",
+		}
+	};
+	constexpr auto songsCount = sizeof(songsList) / sizeof(*songsList);
+	int songId = gNotDetRng() % songsCount;
+}
 #pragma endregion
 
-#pragma region LogicStructures
+#pragma region GameStructures
 struct Action
 {
 	int actionId; // the unique ID of this spell or recipe
 	std::string actionType; // in the first league: BREW; later: CAST, OPPONENT_CAST, LEARN, BREW
-    std::array<int, kIngredients> delta; // by-tier ingredient change
+	std::array<int, kIngredients> delta; // by-tier ingredient change
 	int price; // the price in rupees if this is a potion
 	int tomeIndex; // in the first two leagues: always 0; later: the index in the tome if this is a tome spell, equal to the read-ahead tax
 	int taxCount; // in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell
@@ -422,17 +424,20 @@ struct Action
 	bool repeatable; // for the first two leagues: always 0; later: 1 if this is a repeatable player spell
 	int position = -1; // index in vector
 
-    Action(std::istream& in)
-    {
+	Action(std::istream& in)
+	{
 		in >> actionId >> actionType >> delta[0] >> delta[1] >> delta[2] >> delta[3] >>
-            price >> tomeIndex >> taxCount >> castable >> repeatable;
-    }
+			price >> tomeIndex >> taxCount >> castable >> repeatable;
+	}
 };
+using ActionsContainer = std::vector<Action>;
 
 struct PlayerInfo
 {
 	std::array<int, kIngredients> inv; // by-tier ingredients in inventory
 	int score; // amount of rupees
+
+	PlayerInfo() = default;
 
 	PlayerInfo(std::istream& in)
 	{
@@ -466,189 +471,85 @@ private:
 };
 #pragma endregion
 
-#pragma region Predicates
-bool CanBrew(const Action& potion, const IngredientsContainer& inv)
-{
-    bool ok = true;
-    for (size_t i = 0; i < kIngredients; i++)
-    {
-        ok &= potion.delta[i] + inv[i] >= 0;
-    }
-    return ok;
-}
-
-int ArraySum(const IngredientsContainer& arr)
-{
-	return std::accumulate(arr.begin(), arr.end(), 0);
-}
-
-bool CheckRepeatable(const IngredientsContainer& arr)
-{
-	return std::any_of(arr.begin(), arr.end(), [](const int x) { return x < 0; });
-}
-
-bool CanCast(const Action& cast, const IngredientsContainer& inv)
-{
-	bool ok = true;
-	for (size_t i = 0; i < kIngredients; i++)
-	{
-		ok &= cast.delta[i] + inv[i] >= 0;
-	}
-	return ok && cast.castable && ArraySum(inv) + ArraySum(cast.delta) <= kInventoryCapacity;
-}
-
-float CastProfit(const IngredientsContainer& cast)
-{
-	float result = 0.0f;
-	for (size_t i = 0; i < cast.size(); i++)
-	{
-		result += cast[i] * gIngredientCost[i];
-	}
-	return result;
-}
-#pragma endregion
-
-#pragma warning(push)
-#pragma warning(disable : 4715)
-int GetHighestTierMissingPotionIngredient(const Action& potion, const IngredientsContainer& inv)
-{
-	ASSERT(!CanBrew(potion, inv), "there must be a missing ingredient");
-	for (int i = kIngredients - 1; i >= 0; i--)
-	{
-		if (inv[i] + potion.delta[i] < 0)
-		{
-			return i;
-		}
-	}
-	ASSERT(false, "there must be a missing ingredient");
-}
-#pragma warning(pop)
-
-std::vector<Action> GetDoableRightNow(const std::vector<Action>& source, const IngredientsContainer& inv, 
-	std::function<bool(const Action& obj, const IngredientsContainer& inv)> canDo)
-{
-	auto doableRn = source;
-	doableRn.erase(std::remove_if(doableRn.begin(), doableRn.end(), [inv, canDo](const Action& obj) {
-		return !canDo(obj, inv);
-	}), doableRn.end());
-	return doableRn;
-}
-
-std::string& AppendMessage(std::string& str, int moveNumber)
-{
-    if (moveNumber == 1 && kShowHelloMessage)
-    {
-        str.append(std::string(" ") + kHelloMessage);
-    }
-	if (kSing)
-	{
-		try
-		{
-			str.append(std::string(" ") + gSongs[gSongId].at((moveNumber - kShowHelloMessage - 2) / 1));
-		}
-		catch (...)
-		{
-		}
-	}
-    return str;
-}
-
-void DumpActions(const std::vector<Action>& actions)
-{
-#if DEBUG
-	if (kActionsDump)
-	{
-		for (auto& it : actions)
-		{
-			dbg.Print("Id: %d, t: %s, p: %d, c: %d, r: %d.\n", it.actionId, it.actionType.c_str(),
-				it.price, it.castable, it.repeatable);
-		}
-	}
-#endif
-}
-
-void DumpProfit(bool assertion, const std::vector<Action>& actions, const char* name)
-{
-#if DEBUG
-	if (assertion)
-	{
-		for (auto& it : actions)
-		{
-			dbg.Print("Profit of %s %d = %f.\n", name, it.actionId, CastProfit(it.delta));
-		}
-	}
-#endif
-}
-
-void ClassifyAction(const std::vector<Action>& source, std::vector<Action>& destination, const char* targetName)
-{
-	std::copy_if(source.begin(), source.end(), std::back_inserter(destination), [targetName](const Action& obj) {
-		return obj.actionType == targetName;
-	});
-	for (size_t i = 0; i < destination.size(); i++)
-	{
-		destination[i].position = i;
-	}
-}
-
-void ReadActions(std::vector<Action>& brews, std::vector<Action>& casts, std::vector<Action>& opponent_casts, std::vector<Action>& learns)
-{
-	int actionCount;
-	std::cin >> actionCount;
-	auto actions = std::vector<Action>();
-	actions.reserve(actionCount);
-	std::generate_n(std::back_inserter(actions), actionCount, []() { return Action(std::cin); });
-
-	DumpActions(actions);
-
-	ClassifyAction(actions, brews, "BREW");
-	ClassifyAction(actions, casts, "CAST");
-	ClassifyAction(actions, opponent_casts, "OPPONENT_CAST");
-	ClassifyAction(actions, learns, "LEARN");
-
-	ASSERT(actions.size() == brews.size() + casts.size() + opponent_casts.size() + learns.size(), "some action wasn't recognized");
-	ASSERT(brews.size() == 5);
-}
-
-int main()
-{
-#if DEBUG
-	auto tomeProfit = std::vector<std::pair<float, IngredientsContainer>>(Deck::tome.size());
-	for (size_t i = 0; i < tomeProfit.size(); i++)
-	{
-		tomeProfit[i] = std::make_pair(CastProfit(Deck::tome[i]), Deck::tome[i]);
-	}
-
-	std::sort(tomeProfit.begin(), tomeProfit.end(), [](const auto& lhs, const auto& rhs) {
-		return lhs.first < rhs.first;
-	});
-#endif
-
-	dbg.Print("Preprocessing used %f ms.\n", 1000.0f * clock() / CLOCKS_PER_SEC);
-    for (int moveNumber = 1; ; moveNumber++)
-    {
-#if DEBUG
-		clock_t startTime = clock();
-#endif
-
-#pragma region Reading
-        std::vector<Action> brews;
-        std::vector<Action> casts;
-        std::vector<Action> opponent_casts;
-        std::vector<Action> learns;
-        ReadActions(brews, casts, opponent_casts, learns);
-        auto localInfo = PlayerInfo(std::cin);
-        auto enemyInfo = PlayerInfo(std::cin);
-#pragma endregion
-
-#pragma region DebugDumping
-		DumpProfit(kTomeProfitDump, learns, "tome");
-		DumpProfit(kEnemyCastsProfitDump, opponent_casts, "enemy cast");
-#pragma endregion
-		
 #pragma region Logic
-		std::string answer = "";
+namespace Logic
+{
+	#pragma region Utilities
+	bool CanBrew(const Action& potion, const IngredientsContainer& inv);
 
+	int ArraySum(const IngredientsContainer& arr)
+	{
+		return std::accumulate(arr.begin(), arr.end(), 0);
+	}
+
+	float CastProfit(const IngredientsContainer& cast)
+	{
+		float result = 0.0f;
+		for (size_t i = 0; i < cast.size(); i++)
+		{
+			result += cast[i] * gIngredientCost[i];
+		}
+		return result;
+	}
+
+	#pragma warning(push)
+	#pragma warning(disable : 4715)
+	int GetHighestTierMissingPotionIngredient(const Action& potion, const IngredientsContainer& inv)
+	{
+		ASSERT(!CanBrew(potion, inv), "there must be a missing ingredient");
+		for (int i = kIngredients - 1; i >= 0; i--)
+		{
+			if (inv[i] + potion.delta[i] < 0)
+			{
+				return i;
+			}
+		}
+		ASSERT(false, "there must be a missing ingredient");
+	}
+	#pragma warning(pop)
+
+	ActionsContainer GetDoableRightNow(const ActionsContainer& source, const IngredientsContainer& inv,
+		std::function<bool(const Action& obj, const IngredientsContainer& inv)> canDo)
+	{
+		auto doableRn = source;
+		doableRn.erase(std::remove_if(doableRn.begin(), doableRn.end(), [inv, canDo](const Action& obj) {
+			return !canDo(obj, inv);
+			}), doableRn.end());
+		return doableRn;
+	}
+	#pragma endregion
+
+	#pragma region Predicates
+	bool CanBrew(const Action& potion, const IngredientsContainer& inv)
+	{
+		bool ok = true;
+		for (size_t i = 0; i < kIngredients; i++)
+		{
+			ok &= potion.delta[i] + inv[i] >= 0;
+		}
+		return ok;
+	}
+
+	bool ShouldBeRepeatable(const IngredientsContainer& arr)
+	{
+		return std::any_of(arr.begin(), arr.end(), [](const int x) { return x < 0; });
+	}
+
+	bool CanCast(const Action& cast, const IngredientsContainer& inv)
+	{
+		bool ok = true;
+		for (size_t i = 0; i < kIngredients; i++)
+		{
+			ok &= cast.delta[i] + inv[i] >= 0;
+		}
+		return ok && cast.castable && ArraySum(inv) + ArraySum(cast.delta) <= kInventoryCapacity;
+	}
+	#pragma endregion
+
+	#pragma region Logic
+	std::string Do(int moveNumber, PlayerInfo& localInfo, PlayerInfo& enemyInfo, const ActionsContainer& brews, 
+		const ActionsContainer& casts, const ActionsContainer& opponent_casts, const ActionsContainer& learns)
+	{
 		static auto enemyTracker = EnemyTracker();
 		static auto myselfTracker = EnemyTracker();
 		if (enemyTracker.UpdateBalance(enemyInfo.score))
@@ -663,19 +564,19 @@ int main()
 		auto brewableRn = GetDoableRightNow(brews, localInfo.inv, CanBrew);
 		auto castableRn = GetDoableRightNow(casts, localInfo.inv, CanCast);
 
-		std::sort(brews.begin(), brews.end(), [](const Action& lhs, const Action& rhs) {
+		auto sortedBrews = brews;
+		std::sort(sortedBrews.begin(), sortedBrews.end(), [](const Action& lhs, const Action& rhs) {
 			// Descending!
 			return ArraySum(lhs.delta) > ArraySum(rhs.delta);
 		});
 
-		const auto& targetPotion = *max_element(brews.begin(), brews.end(), [](const Action& a, const Action& b) {
+		const auto& targetPotion = *max_element(sortedBrews.begin(), sortedBrews.end(), [](const Action& a, const Action& b) {
 			return a.price < b.price;
 		});
 
 		if (!learns.empty() && myselfTracker.GetDoneBrews() >= enemyTracker.GetDoneBrews())
 		{
-			answer = std::string("LEARN ") + std::to_string(learns.front().actionId);
-			goto submit;
+			return std::string("LEARN ") + std::to_string(learns.front().actionId);
 		}
 
 		dbg.Print("Target potion: %d (%d).\n", targetPotion.actionId, targetPotion.price);
@@ -688,7 +589,7 @@ int main()
 				auto suitableCasts = castableRn;
 				suitableCasts.erase(std::remove_if(suitableCasts.begin(), suitableCasts.end(), [desiredIngredient](const Action& cast) {
 					return cast.delta[desiredIngredient] <= 0;
-				}), suitableCasts.end());
+					}), suitableCasts.end());
 
 				if (!suitableCasts.empty())
 				{
@@ -697,32 +598,157 @@ int main()
 							return CastProfit(lhs.delta) < CastProfit(rhs.delta);
 						}
 					);
-					answer = std::string("CAST ") + std::to_string(bestSuitableCast.actionId) + " 1";
-					goto submit;
+					return std::string("CAST ") + std::to_string(bestSuitableCast.actionId) + " 1";
 				}
 			} while (--desiredIngredient >= 0);
 		}
 		else
 		{
-			answer = std::string("BREW ") + std::to_string(targetPotion.actionId);
-			goto submit;
+			return std::string("BREW ") + std::to_string(targetPotion.actionId);
 		}
 
-		answer = "REST";
+		return "REST";
+	}
+	#pragma endregion
+}
 #pragma endregion
-		
-#pragma region Submitting
-		submit:
-        // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-        std::cout << AppendMessage(answer, moveNumber) << std::endl;
 
-#if DEBUG
-        dbg.SummarizeAsserts();
+#pragma region DebuggerDump
+namespace DebuggerDump
+{
+	void Actions(const ActionsContainer& actions)
+	{
+		#if DEBUG
+		if (kActionsDump)
+		{
+			for (auto& it : actions)
+			{
+				dbg.Print("Id: %d, t: %s, p: %d, c: %d, r: %d.\n", it.actionId, it.actionType.c_str(),
+					it.price, it.castable, it.repeatable);
+			}
+		}
+		#endif
+	}
+
+	void Profit(bool assertion, const ActionsContainer& actions, const char* name)
+	{
+		#if DEBUG
+		if (assertion)
+		{
+			for (auto& it : actions)
+			{
+				dbg.Print("Profit of %s %d = %f.\n", name, it.actionId, Logic::CastProfit(it.delta));
+			}
+		}
+		#endif
+	}
+}
+#pragma endregion
+
+#pragma region Reading
+namespace Reading
+{
+	void ClassifyAction(const ActionsContainer& source, ActionsContainer& destination, const char* targetName)
+	{
+		std::copy_if(source.begin(), source.end(), std::back_inserter(destination), [targetName](const Action& obj) {
+			return obj.actionType == targetName;
+		});
+		for (size_t i = 0; i < destination.size(); i++)
+		{
+			destination[i].position = i;
+		}
+	}
+
+	void ReadActions(ActionsContainer& brews, ActionsContainer& casts, ActionsContainer& opponent_casts, ActionsContainer& learns)
+	{
+		int actionCount;
+		std::cin >> actionCount;
+		auto actions = ActionsContainer();
+		actions.reserve(actionCount);
+		std::generate_n(std::back_inserter(actions), actionCount, []() { return Action(std::cin); });
+
+		DebuggerDump::Actions(actions);
+
+		ClassifyAction(actions, brews, "BREW");
+		ClassifyAction(actions, casts, "CAST");
+		ClassifyAction(actions, opponent_casts, "OPPONENT_CAST");
+		ClassifyAction(actions, learns, "LEARN");
+
+		ASSERT(actions.size() == brews.size() + casts.size() + opponent_casts.size() + learns.size(), "some action wasn't recognized");
+		ASSERT(brews.size() == 5);
+	}
+
+	void Do(ActionsContainer& brews, ActionsContainer& casts, ActionsContainer& opponent_casts, ActionsContainer& learns,
+		PlayerInfo& localInfo, PlayerInfo& enemyInfo)
+	{
+		ReadActions(brews, casts, opponent_casts, learns);
+		localInfo = PlayerInfo(std::cin);
+		enemyInfo = PlayerInfo(std::cin);
+
+		DebuggerDump::Profit(kTomeProfitDump, learns, "tome");
+		DebuggerDump::Profit(kEnemyCastsProfitDump, opponent_casts, "enemy cast");
+	}
+}
+#pragma endregion
+
+#pragma region Submitting
+namespace Submitting
+{
+	std::string AppendMessage(std::string&& str, int moveNumber)
+	{
+		if (moveNumber == 1 && kShowHelloMessage)
+		{
+			str.append(std::string(" ") + kHelloMessage);
+		}
+		if (kSing)
+		{
+			try
+			{
+				str.append(std::string(" ") + Songs::songsList[Songs::songId].at((moveNumber - kShowHelloMessage - 2) / 1));
+			}
+			catch (...)
+			{
+			}
+		}
+		return str;
+	}
+
+	void Submit(std::string& command, int moveNumber)
+	{
+		std::cout << AppendMessage(std::move(command), moveNumber) << std::endl;
+	}
+}
+#pragma endregion
+
+int main()
+{
+	for (int moveNumber = 1; ; moveNumber++)
+	{
+		#if DEBUG
+		clock_t startTime = moveNumber == 1 ? 0 : clock();
+		#endif
+
+		ActionsContainer brews, casts, opponent_casts, learns;
+		PlayerInfo localInfo, enemyInfo;
+		Reading::Do(brews, casts, opponent_casts, learns, localInfo, enemyInfo);
+
+		std::string answer = Logic::Do(moveNumber, localInfo, enemyInfo, brews, casts, opponent_casts, learns);
+
+		Submitting::Submit(answer, moveNumber);
+
+		#if DEBUG
+		dbg.SummarizeAsserts();
 		float curTime = 1000.0f * (clock() - startTime) / CLOCKS_PER_SEC;
 		static float maxTime = 0.0;
-		maxTime = std::max(maxTime, curTime);
-		dbg.Print("Used %f ms. Max used %f ms.\n", curTime, maxTime);
-#endif
-#pragma endregion
-    }
+		if (moveNumber == 1)
+		{
+			dbg.Print("Used %f ms on the first move.\n", curTime);
+		}
+		else
+		{
+			maxTime = std::max(maxTime, curTime);
+			dbg.Print("Used %f ms. Max used %f ms.\n", curTime, maxTime);
+		}
+		#endif
+	}
 }

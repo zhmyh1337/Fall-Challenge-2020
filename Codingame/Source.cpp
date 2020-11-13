@@ -443,35 +443,35 @@ struct PlayerInfo
 class Submit
 {
 public:
-	static std::string Brew(const Action& brew, int bonus[2])
+	static std::string Brew(const Action& brew/*, int bonus[2]*/)
 	{
-		if (brew.position < 2)
-		{
-			bonusCountdown[brew.position]--;
-			if (bonusCountdown[0] <= 0)
-			{
-				bonusCountdown[0] = bonusCountdown[1];
-				bonusCountdown[1] = 0;
-				bonus[0] = 1;
-				bonus[1] = 0;
-			}
-
-			if (bonusCountdown[0] <= 0)
-			{
-				bonus[0] = 0;
-			}
-			if (bonusCountdown[1] <= 0)
-			{
-				bonus[1] = 0;
-			}
-		}
+// 		if (brew.position < 2)
+// 		{
+// 			bonusCountdown[brew.position]--;
+// 			if (bonusCountdown[0] <= 0)
+// 			{
+// 				bonusCountdown[0] = bonusCountdown[1];
+// 				bonusCountdown[1] = 0;
+// 				bonus[0] = 1;
+// 				bonus[1] = 0;
+// 			}
+// 
+// 			if (bonusCountdown[0] <= 0)
+// 			{
+// 				bonus[0] = 0;
+// 			}
+// 			if (bonusCountdown[1] <= 0)
+// 			{
+// 				bonus[1] = 0;
+// 			}
+// 		}
 
 		return std::string("BREW ") + std::to_string(brew.actionId);
 	}
 private:
-	static int bonusCountdown[2];
+// 	static int bonusCountdown[2];
 };
-int Submit::bonusCountdown[2] = { 4, 4 };
+// int Submit::bonusCountdown[2] = { 4, 4 };
 #pragma endregion
 
 #pragma region Predicates
@@ -635,10 +635,10 @@ int main()
 #pragma region Logic
 		std::string answer = "";
 
-		static int bonus[2] = { 3, 1 };
-		dbg.Print("Bonuses: %d %d.\n", bonus[0], bonus[1]);
-		brews[0].price += bonus[0];
-		brews[1].price += bonus[1];
+// 		static int bonus[2] = { 3, 1 };
+// 		dbg.Print("Bonuses: %d %d.\n", bonus[0], bonus[1]);
+// 		brews[0].price += bonus[0];
+// 		brews[1].price += bonus[1];
 
 		auto brewableRn = GetDoableRightNow(brews, localInfo.inv, CanBrew);
 		auto castableRn = GetDoableRightNow(casts, localInfo.inv, CanCast);
@@ -658,14 +658,16 @@ int main()
 			goto submit;
 		}
 
+		dbg.Print("Target potion: %d (%d).\n", targetPotion.actionId, targetPotion.price);
 		if (!CanBrew(targetPotion, localInfo.inv))
 		{
 			auto desiredIngredient = GetHighestTierMissingPotionIngredient(targetPotion, localInfo.inv);
+			dbg.Print("Desired ingredient: %d.\n", desiredIngredient);
 			do
 			{
 				auto suitableCasts = castableRn;
 				suitableCasts.erase(std::remove_if(suitableCasts.begin(), suitableCasts.end(), [desiredIngredient](const Action& cast) {
-					return cast.delta[desiredIngredient] == 0;
+					return cast.delta[desiredIngredient] <= 0;
 				}), suitableCasts.end());
 
 				if (!suitableCasts.empty())
@@ -682,7 +684,7 @@ int main()
 		}
 		else
 		{
-			answer = Submit::Brew(targetPotion, bonus);
+			answer = Submit::Brew(targetPotion/*, bonus*/);
 			goto submit;
 		}
 		answer = "REST";

@@ -20,7 +20,7 @@
 #pragma endregion
 
 #pragma region Constants
-constexpr bool kActionsDump = true;
+constexpr bool kActionsDump = false;
 constexpr bool kShowHelloMessage = true;
 constexpr bool kSing = true;
 constexpr const char* kHelloMessage = "Кулити";
@@ -569,10 +569,6 @@ void DumpActions(const std::vector<Action>& actions)
 		{
 			dbg.Print("Id: %d, t: %s, p: %d, c: %d, r: %d.\n", it.actionId, it.actionType.c_str(),
 				it.price, it.castable, it.repeatable);
-			if (it.actionType == "LEARN")
-			{
-				dbg.Print("Profit: %f.\n", CastProfit(it.delta));
-			}
 		}
 	}
 }
@@ -656,17 +652,30 @@ int main()
 			return a.price < b.price;
 		});
 
+		if (!learns.empty())
+		{
+			answer = std::string("LEARN ") + std::to_string(learns.front().actionId);
+			goto submit;
+		}
+
 		if (!CanBrew(targetPotion, localInfo.inv))
 		{
 			auto desiredIngredient = GetHighestTierMissingPotionIngredient(targetPotion, localInfo.inv);
-			do 
+			do
 			{
-				auto suitableCast = std::find_if(castableRn.begin(), castableRn.end(), [desiredIngredient](const Action& cast) {
-					return cast.delta[desiredIngredient] > 0;
-				});
-				if (suitableCast != castableRn.end())
+				auto suitableCasts = castableRn;
+				suitableCasts.erase(std::remove_if(suitableCasts.begin(), suitableCasts.end(), [desiredIngredient](const Action& cast) {
+					return cast.delta[desiredIngredient] == 0;
+				}), suitableCasts.end());
+
+				if (!suitableCasts.empty())
 				{
-					answer = std::string("CAST ") + std::to_string(suitableCast->actionId) + " 1";
+					const auto& bestSuitableCast = *std::max_element(suitableCasts.begin(), suitableCasts.end(),
+						[](const Action& lhs, const Action& rhs) {
+							return CastProfit(lhs.delta) < CastProfit(rhs.delta);
+						}
+					);
+					answer = std::string("CAST ") + std::to_string(bestSuitableCast.actionId) + " 1";
 					goto submit;
 				}
 			} while (--desiredIngredient >= 0);

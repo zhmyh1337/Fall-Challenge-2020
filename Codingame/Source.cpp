@@ -5,18 +5,21 @@
 #include <algorithm>
 #include <cstdarg>
 #include <unordered_set>
+#include <unordered_map>
 #include <sstream>
 #include <numeric>
 #include <functional>
 #include <random>
-#include <ctime>
 #include <array>
+#include <bitset>
+#include <chrono>
 #pragma endregion
 
 #pragma region ChangeableMacros
 #define DEBUG_ACTIVE 1
 #define ASSERTS_ACTIVE 1
 #define DEBUG_IN_RELEASE 1
+#define VECTOR_ASSERTS 0
 #pragma endregion
 
 #pragma region Constants
@@ -28,15 +31,17 @@ constexpr bool kSing = true;
 constexpr const char* kHelloMessage = "Кулити";
 constexpr size_t kIngredients = 4;
 constexpr size_t kInventoryCapacity = 10;
-constexpr int kStopLearningAfter = 11;
+constexpr int kStopLearningAfter = 5;
 #pragma endregion
 
 using IngredientsContainer = std::array<int, kIngredients>;
+using ChronoClock = std::chrono::high_resolution_clock;
 
 #pragma region Globals
 std::mt19937 gRng(42);
-std::mt19937 gNotDetRng((uint32_t)time(0)); // not deterministic random (seeded with time)
+std::mt19937 gNotDetRng((uint32_t)ChronoClock::now().time_since_epoch().count()); // not deterministic random (seeded with time)
 float gIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
+std::vector<IngredientsContainer> gAllPossibleInventories;
 #pragma endregion
 
 #pragma region Hardcode
@@ -130,9 +135,9 @@ namespace Deck
 
 #pragma region Debugger
 #if DEBUG_ACTIVE and (defined(_DEBUG) or DEBUG_IN_RELEASE)
-	#define DEBUG 1
+#define DEBUG 1
 #else
-	#define DEBUG 0
+#define DEBUG 0
 #endif
 
 class IDebugger
@@ -411,12 +416,147 @@ namespace Songs
 }
 #pragma endregion
 
+#pragma region Utilities
+namespace my
+{
+	#pragma warning(push)
+	#pragma warning(disable : 6385)
+	template<typename T, size_t capacity>
+	class vector
+	{
+		T arr[capacity];
+		size_t sz = 0;
+
+	public:
+		using iterator = T*;
+		using const_iterator = const T*;
+
+		vector()
+		{
+		}
+
+		template <typename... Ts>
+		void emplace_back(Ts&&... args)
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(sz < capacity);
+			#endif
+			arr[sz++] = T(std::forward<Ts>(args)...);
+		}
+
+		template <typename... Ts>
+		void emplace(size_t pos, Ts&&... args)
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(sz < capacity);
+			#endif
+			for (size_t i = sz; i > pos; --i)
+				arr[i] = arr[i - 1];
+			arr[pos] = T(std::forward<Ts>(args)...);
+			sz++;
+		}
+
+		size_t size() const
+		{
+			return sz;
+		}
+
+		bool empty() const
+		{
+			return !size();
+		}
+
+		T& front()
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(!empty());
+			#endif
+			return arr[0];
+		}
+
+		const T& front() const
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(!empty());
+			#endif
+			return arr[0];
+		}
+
+		T& back()
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(!empty());
+			#endif
+			return arr[sz - 1];
+		}
+
+		const T& back() const
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(!empty());
+			#endif
+			return arr[sz - 1];
+		}
+
+		void pop_back()
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(!empty());
+			#endif
+			sz--;
+		}
+
+		T& operator[](const size_t index)
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(index < sz);
+			#endif
+			return arr[index];
+		}
+
+		const T& operator[](const size_t index) const
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(index < sz);
+			#endif
+			return arr[index];
+		}
+
+		void erase(const_iterator from)
+		{
+			sz = from - begin();
+		}
+
+		iterator begin()
+		{
+			return &arr[0];
+		}
+
+		iterator end()
+		{
+			return &arr[sz - 1] + 1;
+		}
+
+		const_iterator begin() const
+		{
+			return &arr[0];
+		}
+
+		const_iterator end() const
+		{
+			return &arr[sz - 1] + 1;
+		}
+	};
+	#pragma warning(pop)
+}
+#pragma endregion
+
 #pragma region GameStructures
 struct Action
 {
 	int actionId; // the unique ID of this spell or recipe
 	std::string actionType; // in the first league: BREW; later: CAST, OPPONENT_CAST, LEARN, BREW
-	std::array<int, kIngredients> delta; // by-tier ingredient change
+	IngredientsContainer delta; // by-tier ingredient change
 	int price; // the price in rupees if this is a potion
 	int tomeIndex; // in the first two leagues: always 0; later: the index in the tome if this is a tome spell, equal to the read-ahead tax
 	int taxCount; // in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell
@@ -434,7 +574,7 @@ using ActionsContainer = std::vector<Action>;
 
 struct PlayerInfo
 {
-	std::array<int, kIngredients> inv; // by-tier ingredients in inventory
+	IngredientsContainer inv; // by-tier ingredients in inventory
 	int score; // amount of rupees
 
 	PlayerInfo() = default;
@@ -477,12 +617,20 @@ namespace Logic
 	#pragma region Utilities
 	bool CanBrew(const Action& potion, const IngredientsContainer& inv);
 
-	int ArraySum(const IngredientsContainer& arr)
+	int DeltaSum(const IngredientsContainer& arr)
 	{
 		return std::accumulate(arr.begin(), arr.end(), 0);
 	}
 
-	float CastProfit(const IngredientsContainer& cast)
+	void ApplyDelta(IngredientsContainer& destination, const IngredientsContainer& delta)
+	{
+		for (size_t i = 0; i < destination.size(); i++)
+		{
+			destination[i] += delta[i];
+		}
+	}
+
+	float IngredientsWorth(const IngredientsContainer& cast)
 	{
 		float result = 0.0f;
 		for (size_t i = 0; i < cast.size(); i++)
@@ -542,12 +690,118 @@ namespace Logic
 		{
 			ok &= cast.delta[i] + inv[i] >= 0;
 		}
-		return ok && cast.castable && ArraySum(inv) + ArraySum(cast.delta) <= kInventoryCapacity;
+		return ok && cast.castable && DeltaSum(inv) + DeltaSum(cast.delta) <= kInventoryCapacity;
+	}
+
+	bool CorrectInventory(const IngredientsContainer& inv)
+	{
+		return DeltaSum(inv) <= 10 && std::all_of(inv.begin(), inv.end(), [](const int x) { return x >= 0; });
 	}
 	#pragma endregion
 
-	#pragma region Logic
-	std::string Do(int moveNumber, PlayerInfo& localInfo, PlayerInfo& enemyInfo, const ActionsContainer& brews, 
+	#pragma region Graph
+	template<size_t castsCount>
+	class Graph
+	{
+	public:
+		enum class EdgeType
+		{
+			Rest = 0,
+			Cast,
+			Brew,
+			Learn,
+		};
+
+		Graph()
+		{
+			// Time consuming code!
+			for (const auto& inv : gAllPossibleInventories)
+			{
+				for (int castableMask = 0; castableMask < 1 << castsCount; castableMask++)
+				{
+					int currentVertex = ToVertexIndex(inv, castableMask);
+					auto& edges = _adjacencyList[currentVertex];
+
+					constexpr int fullCastableMask = ~0 & (1 << castsCount) - 1;
+					edges.emplace_back(EdgeType::Rest, ToVertexIndex(inv, fullCastableMask));
+				}
+			}
+		}
+
+		Graph(const Graph& graph, const ActionsContainer& casts)
+		{
+			*this = graph;
+			ASSERT(casts.size() == castsCount);
+			// Time consuming code!
+			for (const auto& inv : gAllPossibleInventories)
+			{
+				for (int castableMask = 0; castableMask < 1 << castsCount; castableMask++)
+				{
+					int currentVertex = ToVertexIndex(inv, castableMask);
+					auto& edges = _adjacencyList[currentVertex];
+
+					for (size_t i = 0; i < castsCount; i++)
+					{
+						if (castableMask & 1 << i)
+						{
+							auto newInventory = inv;
+							ApplyDelta(newInventory, casts[i].delta);
+
+							if (!CorrectInventory(newInventory))
+							{
+								continue;
+							}
+
+							int newVertex = ToVertexIndex(newInventory, castableMask ^ (1 << i));
+							edges.emplace_back(EdgeType::Cast, newVertex);
+						}
+					}
+				}
+			}
+		}
+
+		static inline int ToVertexIndex(const IngredientsContainer& inv, int castable)
+		{
+			return
+				inv[0] << (0 * 4) |
+				inv[1] << (1 * 4) |
+				inv[2] << (2 * 4) |
+				inv[3] << (3 * 4) |
+				castable << (4 * 4);
+		}
+
+		static const Graph gGraphPrototype;
+	private:
+		std::unordered_map<int, my::vector<std::pair<EdgeType, int>, kStopLearningAfter + 1>> _adjacencyList;
+	};
+	template<size_t castsCount>
+	const Graph<castsCount> Graph<castsCount>::gGraphPrototype{};
+	#pragma endregion
+
+	#pragma region Preprocessing
+	void DoPreprocessing()
+	{
+		for (int _1 = 0; _1 <= kInventoryCapacity; _1++)
+		{
+			for (int _2 = 0; _2 <= kInventoryCapacity; _2++)
+			{
+				for (int _3 = 0; _3 <= kInventoryCapacity; _3++)
+				{
+					for (int _4 = 0; _4 <= kInventoryCapacity; _4++)
+					{
+						if (_1 + _2 + _3 + _4 <= kInventoryCapacity)
+						{
+							gAllPossibleInventories.push_back({ _1, _2, _3, _4 });
+						}
+					}
+				}
+			}
+		}
+	}
+	#pragma endregion
+
+	#pragma region Main
+	std::string DoMain(int moveNumber, PlayerInfo& localInfo, PlayerInfo& enemyInfo, const ActionsContainer& brews,
 		const ActionsContainer& casts, const ActionsContainer& opponent_casts, const ActionsContainer& learns)
 	{
 		static auto enemyTracker = EnemyTracker();
@@ -561,51 +815,12 @@ namespace Logic
 			dbg.Print("I brewed a potion.\n");
 		}
 
-		auto brewableRn = GetDoableRightNow(brews, localInfo.inv, CanBrew);
-		auto castableRn = GetDoableRightNow(casts, localInfo.inv, CanCast);
-
-		auto sortedBrews = brews;
-		std::sort(sortedBrews.begin(), sortedBrews.end(), [](const Action& lhs, const Action& rhs) {
-			// Descending!
-			return ArraySum(lhs.delta) > ArraySum(rhs.delta);
-		});
-
-		const auto& targetPotion = *max_element(sortedBrews.begin(), sortedBrews.end(), [](const Action& a, const Action& b) {
-			return a.price < b.price;
-		});
-
-		if (!learns.empty() && myselfTracker.GetDoneBrews() >= enemyTracker.GetDoneBrews())
+		if (!learns.empty() && casts.size() < kStopLearningAfter)
 		{
 			return std::string("LEARN ") + std::to_string(learns.front().actionId);
 		}
 
-		dbg.Print("Target potion: %d (%d).\n", targetPotion.actionId, targetPotion.price);
-		if (!CanBrew(targetPotion, localInfo.inv))
-		{
-			auto desiredIngredient = GetHighestTierMissingPotionIngredient(targetPotion, localInfo.inv);
-			dbg.Print("Desired ingredient: %d.\n", desiredIngredient);
-			do
-			{
-				auto suitableCasts = castableRn;
-				suitableCasts.erase(std::remove_if(suitableCasts.begin(), suitableCasts.end(), [desiredIngredient](const Action& cast) {
-					return cast.delta[desiredIngredient] <= 0;
-					}), suitableCasts.end());
-
-				if (!suitableCasts.empty())
-				{
-					const auto& bestSuitableCast = *std::max_element(suitableCasts.begin(), suitableCasts.end(),
-						[](const Action& lhs, const Action& rhs) {
-							return CastProfit(lhs.delta) < CastProfit(rhs.delta);
-						}
-					);
-					return std::string("CAST ") + std::to_string(bestSuitableCast.actionId) + " 1";
-				}
-			} while (--desiredIngredient >= 0);
-		}
-		else
-		{
-			return std::string("BREW ") + std::to_string(targetPotion.actionId);
-		}
+		auto graph = Graph<kStopLearningAfter>(Graph<kStopLearningAfter>::gGraphPrototype, casts);
 
 		return "REST";
 	}
@@ -637,7 +852,7 @@ namespace DebuggerDump
 		{
 			for (auto& it : actions)
 			{
-				dbg.Print("Profit of %s %d = %f.\n", name, it.actionId, Logic::CastProfit(it.delta));
+				dbg.Print("Profit of %s %d = %f.\n", name, it.actionId, Logic::IngredientsWorth(it.delta));
 			}
 		}
 		#endif
@@ -652,7 +867,7 @@ namespace Reading
 	{
 		std::copy_if(source.begin(), source.end(), std::back_inserter(destination), [targetName](const Action& obj) {
 			return obj.actionType == targetName;
-		});
+			});
 		for (size_t i = 0; i < destination.size(); i++)
 		{
 			destination[i].position = i;
@@ -722,32 +937,37 @@ namespace Submitting
 
 int main()
 {
+	auto startTime = ChronoClock::now();
+	Logic::DoPreprocessing();
+	float preprocessingTime = (float)std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count();
+	dbg.Print("Preprocessing used %f ms.\n", preprocessingTime);
+
 	for (int moveNumber = 1; ; moveNumber++)
 	{
 		#if DEBUG
-		clock_t startTime = moveNumber == 1 ? 0 : clock();
+		startTime = ChronoClock::now();
 		#endif
 
 		ActionsContainer brews, casts, opponent_casts, learns;
 		PlayerInfo localInfo, enemyInfo;
 		Reading::Do(brews, casts, opponent_casts, learns, localInfo, enemyInfo);
 
-		std::string answer = Logic::Do(moveNumber, localInfo, enemyInfo, brews, casts, opponent_casts, learns);
+		std::string answer = Logic::DoMain(moveNumber, localInfo, enemyInfo, brews, casts, opponent_casts, learns);
 
 		Submitting::Submit(answer, moveNumber);
 
 		#if DEBUG
 		dbg.SummarizeAsserts();
-		float curTime = 1000.0f * (clock() - startTime) / CLOCKS_PER_SEC;
+		float timePassed = (float)std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count();
 		static float maxTime = 0.0;
 		if (moveNumber == 1)
 		{
-			dbg.Print("Used %f ms on the first move.\n", curTime);
+			dbg.Print("Used %f (+%f) ms on the first move.\n", timePassed, preprocessingTime);
 		}
 		else
 		{
-			maxTime = std::max(maxTime, curTime);
-			dbg.Print("Used %f ms. Max used %f ms.\n", curTime, maxTime);
+			maxTime = std::max(maxTime, timePassed);
+			dbg.Print("Used %f ms. Max used %f ms.\n", timePassed, maxTime);
 		}
 		#endif
 	}

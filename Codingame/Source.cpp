@@ -17,11 +17,19 @@
 #include <optional>
 #pragma endregion
 
+#pragma region Pragmas
+#if not defined(_DEBUG) and not defined(NDEBUG)
+#pragma GCC optimize "Ofast,unroll-loops,omit-frame-pointer,inline"
+#pragma GCC option("arch=native", "tune=native", "no-zero-upper")
+#pragma GCC target("rdrnd", "popcnt", "avx", "bmi2")
+#endif
+#pragma endregion
+
 #pragma region ChangeableMacros
 #define DEBUG_ACTIVE 1
 #define ASSERTS_ACTIVE 1
 #define DEBUG_IN_RELEASE 1
-#define VECTOR_ASSERTS 0
+#define VECTOR_ASSERTS 1
 #pragma endregion
 
 #pragma region Constants
@@ -30,6 +38,7 @@ constexpr bool kActionsDump = false;
 constexpr bool kTomeProfitDump = false;
 constexpr bool kEnemyCastsProfitDump = false;
 constexpr bool kBrewPathsDump = true;
+constexpr bool kGraphInfoDump = true;
 #pragma endregion
 constexpr bool kShowHelloMessage = true;
 constexpr bool kSing = true;
@@ -38,17 +47,18 @@ constexpr size_t kIngredients = 4;
 constexpr size_t kInventoryCapacity = 10;
 constexpr size_t kClientsInHutCapacity = 5;
 constexpr int kStopLearningAfter = 10;
-constexpr int kMaxBfsDepth = 7;
+constexpr int kMaxBfsDepth = 999999;
+constexpr int kGraphSizeCut = 12000;
+constexpr int kMaxEdgesFromVertex = kStopLearningAfter + 1;
 #pragma endregion
 
 using IngredientsContainer = std::array<int, kIngredients>;
 using ChronoClock = std::chrono::high_resolution_clock;
 
 #pragma region Globals
-std::mt19937 gRng(42);
+std::mt19937 gRng(1);
 std::mt19937 gNotDetRng((uint32_t)ChronoClock::now().time_since_epoch().count()); // not deterministic random (seeded with time)
 float gIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
-// std::vector<IngredientsContainer> gAllPossibleInventories;
 #pragma endregion
 
 #pragma region Hardcode
@@ -100,42 +110,42 @@ namespace Deck
 	};
 
 	std::vector<std::pair<IngredientsContainer, int>> orders = {
-		std::make_pair(IngredientsContainer{2, 0, 2, 0}, 6),
-		std::make_pair(IngredientsContainer{3, 0, 2, 0}, 7),
-		std::make_pair(IngredientsContainer{0, 0, 4, 0}, 8),
-		std::make_pair(IngredientsContainer{2, 2, 0, 0}, 8),
-		std::make_pair(IngredientsContainer{2, 0, 3, 0}, 8),
-		std::make_pair(IngredientsContainer{3, 2, 0, 0}, 9),
-		std::make_pair(IngredientsContainer{0, 2, 2, 0}, 10),
-		std::make_pair(IngredientsContainer{0, 0, 5, 0}, 10),
-		std::make_pair(IngredientsContainer{2, 0, 0, 2}, 10),
-		std::make_pair(IngredientsContainer{2, 3, 0, 0}, 11),
-		std::make_pair(IngredientsContainer{3, 0, 0, 2}, 11),
-		std::make_pair(IngredientsContainer{0, 4, 0, 0}, 12),
-		std::make_pair(IngredientsContainer{0, 0, 2, 2}, 12),
-		std::make_pair(IngredientsContainer{0, 2, 3, 0}, 12),
-		std::make_pair(IngredientsContainer{0, 3, 2, 0}, 13),
-		std::make_pair(IngredientsContainer{0, 2, 0, 2}, 14),
-		std::make_pair(IngredientsContainer{0, 0, 3, 2}, 14),
-		std::make_pair(IngredientsContainer{2, 0, 0, 3}, 14),
-		std::make_pair(IngredientsContainer{0, 5, 0, 0}, 15),
-		std::make_pair(IngredientsContainer{0, 0, 0, 4}, 16),
-		std::make_pair(IngredientsContainer{0, 0, 2, 3}, 16),
-		std::make_pair(IngredientsContainer{0, 3, 0, 2}, 17),
-		std::make_pair(IngredientsContainer{0, 2, 0, 3}, 18),
-		std::make_pair(IngredientsContainer{0, 0, 0, 5}, 20),
-		std::make_pair(IngredientsContainer{2, 0, 1, 1}, 9),
-		std::make_pair(IngredientsContainer{0, 1, 2, 1}, 12),
-		std::make_pair(IngredientsContainer{1, 2, 0, 1}, 12),
-		std::make_pair(IngredientsContainer{2, 2, 2, 0}, 13),
-		std::make_pair(IngredientsContainer{2, 0, 2, 2}, 15),
-		std::make_pair(IngredientsContainer{2, 2, 0, 2}, 17),
-		std::make_pair(IngredientsContainer{0, 2, 2, 2}, 19),
-		std::make_pair(IngredientsContainer{1, 1, 1, 1}, 12),
-		std::make_pair(IngredientsContainer{3, 1, 1, 1}, 14),
-		std::make_pair(IngredientsContainer{1, 1, 3, 1}, 16),
-		std::make_pair(IngredientsContainer{1, 3, 1, 1}, 18),
-		std::make_pair(IngredientsContainer{1, 1, 1, 3}, 20),
+		std::make_pair(IngredientsContainer{-2, -0, -2, -0}, 6),
+		std::make_pair(IngredientsContainer{-3, -0, -2, -0}, 7),
+		std::make_pair(IngredientsContainer{-0, -0, -4, -0}, 8),
+		std::make_pair(IngredientsContainer{-2, -2, -0, -0}, 8),
+		std::make_pair(IngredientsContainer{-2, -0, -3, -0}, 8),
+		std::make_pair(IngredientsContainer{-3, -2, -0, -0}, 9),
+		std::make_pair(IngredientsContainer{-0, -2, -2, -0}, 10),
+		std::make_pair(IngredientsContainer{-0, -0, -5, -0}, 10),
+		std::make_pair(IngredientsContainer{-2, -0, -0, -2}, 10),
+		std::make_pair(IngredientsContainer{-2, -3, -0, -0}, 11),
+		std::make_pair(IngredientsContainer{-3, -0, -0, -2}, 11),
+		std::make_pair(IngredientsContainer{-0, -4, -0, -0}, 12),
+		std::make_pair(IngredientsContainer{-0, -0, -2, -2}, 12),
+		std::make_pair(IngredientsContainer{-0, -2, -3, -0}, 12),
+		std::make_pair(IngredientsContainer{-0, -3, -2, -0}, 13),
+		std::make_pair(IngredientsContainer{-0, -2, -0, -2}, 14),
+		std::make_pair(IngredientsContainer{-0, -0, -3, -2}, 14),
+		std::make_pair(IngredientsContainer{-2, -0, -0, -3}, 14),
+		std::make_pair(IngredientsContainer{-0, -5, -0, -0}, 15),
+		std::make_pair(IngredientsContainer{-0, -0, -0, -4}, 16),
+		std::make_pair(IngredientsContainer{-0, -0, -2, -3}, 16),
+		std::make_pair(IngredientsContainer{-0, -3, -0, -2}, 17),
+		std::make_pair(IngredientsContainer{-0, -2, -0, -3}, 18),
+		std::make_pair(IngredientsContainer{-0, -0, -0, -5}, 20),
+		std::make_pair(IngredientsContainer{-2, -0, -1, -1}, 9),
+		std::make_pair(IngredientsContainer{-0, -1, -2, -1}, 12),
+		std::make_pair(IngredientsContainer{-1, -2, -0, -1}, 12),
+		std::make_pair(IngredientsContainer{-2, -2, -2, -0}, 13),
+		std::make_pair(IngredientsContainer{-2, -0, -2, -2}, 15),
+		std::make_pair(IngredientsContainer{-2, -2, -0, -2}, 17),
+		std::make_pair(IngredientsContainer{-0, -2, -2, -2}, 19),
+		std::make_pair(IngredientsContainer{-1, -1, -1, -1}, 12),
+		std::make_pair(IngredientsContainer{-3, -1, -1, -1}, 14),
+		std::make_pair(IngredientsContainer{-1, -1, -3, -1}, 16),
+		std::make_pair(IngredientsContainer{-1, -3, -1, -1}, 18),
+		std::make_pair(IngredientsContainer{-1, -1, -1, -3}, 20),
 	};
 }
 #pragma endregion
@@ -431,7 +441,7 @@ namespace my
 	template<typename T, size_t capacity>
 	class vector
 	{
-		T arr[capacity];
+		T data[capacity];
 		size_t sz = 0;
 
 	public:
@@ -448,7 +458,7 @@ namespace my
 			#if VECTOR_ASSERTS
 			ASSERT(sz < capacity);
 			#endif
-			arr[sz++] = T(std::forward<Ts>(args)...);
+			data[sz++] = T(std::forward<Ts>(args)...);
 		}
 
 		template <typename... Ts>
@@ -458,8 +468,8 @@ namespace my
 			ASSERT(sz < capacity);
 			#endif
 			for (size_t i = sz; i > pos; --i)
-				arr[i] = arr[i - 1];
-			arr[pos] = T(std::forward<Ts>(args)...);
+				data[i] = data[i - 1];
+			data[pos] = T(std::forward<Ts>(args)...);
 			sz++;
 		}
 
@@ -478,7 +488,7 @@ namespace my
 			#if VECTOR_ASSERTS
 			ASSERT(!empty());
 			#endif
-			return arr[0];
+			return data[0];
 		}
 
 		const T& front() const
@@ -486,7 +496,7 @@ namespace my
 			#if VECTOR_ASSERTS
 			ASSERT(!empty());
 			#endif
-			return arr[0];
+			return data[0];
 		}
 
 		T& back()
@@ -494,7 +504,7 @@ namespace my
 			#if VECTOR_ASSERTS
 			ASSERT(!empty());
 			#endif
-			return arr[sz - 1];
+			return data[sz - 1];
 		}
 
 		const T& back() const
@@ -502,7 +512,7 @@ namespace my
 			#if VECTOR_ASSERTS
 			ASSERT(!empty());
 			#endif
-			return arr[sz - 1];
+			return data[sz - 1];
 		}
 
 		void pop_back()
@@ -518,7 +528,7 @@ namespace my
 			#if VECTOR_ASSERTS
 			ASSERT(index < sz);
 			#endif
-			return arr[index];
+			return data[index];
 		}
 
 		const T& operator[](const size_t index) const
@@ -526,7 +536,7 @@ namespace my
 			#if VECTOR_ASSERTS
 			ASSERT(index < sz);
 			#endif
-			return arr[index];
+			return data[index];
 		}
 
 		void erase(const_iterator from)
@@ -536,22 +546,22 @@ namespace my
 
 		iterator begin()
 		{
-			return &arr[0];
+			return &data[0];
 		}
 
 		iterator end()
 		{
-			return &arr[sz - 1] + 1;
+			return &data[sz - 1] + 1;
 		}
 
 		const_iterator begin() const
 		{
-			return &arr[0];
+			return &data[0];
 		}
 
 		const_iterator end() const
 		{
-			return &arr[sz - 1] + 1;
+			return &data[sz - 1] + 1;
 		}
 	};
 	#pragma warning(pop)
@@ -572,9 +582,18 @@ struct Action
 	int position = -1; // index in vector
 
 	// For debug.
-	#if 0
+	#if (defined(_DEBUG) or defined(NDEBUG)) and 1
+	Action()
+	{
+	}
+
 	Action(const IngredientsContainer& delta, bool castable, bool repeatable)
 		: delta(delta), castable(castable), repeatable(repeatable)
+	{
+	}
+
+	Action(const IngredientsContainer& delta, int price)
+		: delta(delta), price(price)
 	{
 	}
 	#endif
@@ -743,6 +762,13 @@ namespace Logic
 			VertexIndexType child;
 			const Action* performedAction;
 
+			#pragma warning(push)
+			#pragma warning(disable : 26495)
+			Edge()
+			{
+			}
+			#pragma warning(pop)
+
 			Edge(EdgeType edgeType, VertexIndexType child, const Action* performedAction = nullptr)
 				: edgeType(edgeType), child(child), performedAction(performedAction)
 			{
@@ -791,12 +817,12 @@ namespace Logic
 		std::unordered_map<VertexIndexType, std::pair<int, ReverseEdge>> distanceList;
 
 	private:
-		std::vector<Edge> GetEdgesOfVertex(VertexIndexType vertex, const ActionsContainer& casts)
+		my::vector<Edge, kMaxEdgesFromVertex> GetEdgesOfVertex(VertexIndexType vertex, const ActionsContainer& casts)
 		{
 			auto inventory = InventoryFromVertexIndex(vertex);
 			auto castableMask = CastableMaskFromVertexIndex(vertex);
 
-			std::vector<Edge> edges;
+			my::vector<Edge, kMaxEdgesFromVertex> edges;
 
 			auto fullCastableMask = ((CastableMaskType)1 << _castsCount) - 1;
 			edges.emplace_back(EdgeType::Rest, ToVertexIndex(inventory, fullCastableMask));
@@ -826,7 +852,7 @@ namespace Logic
 			{
 				auto [vertex, distance] = q.front();
 				q.pop();
-				if (distance == maxDepth)
+				if (distance == maxDepth || distanceList.size() > kGraphSizeCut)
 				{
 					continue;
 				}
@@ -875,24 +901,7 @@ namespace Logic
 	#pragma region Preprocessing
 	void DoPreprocessing()
 	{
-		#if 0
-		for (int _1 = 0; _1 <= kInventoryCapacity; _1++)
-		{
-			for (int _2 = 0; _2 <= kInventoryCapacity; _2++)
-			{
-				for (int _3 = 0; _3 <= kInventoryCapacity; _3++)
-				{
-					for (int _4 = 0; _4 <= kInventoryCapacity; _4++)
-					{
-						if (_1 + _2 + _3 + _4 <= kInventoryCapacity)
-						{
-							gAllPossibleInventories.push_back({ _1, _2, _3, _4 });
-						}
-					}
-				}
-			}
-		}
-		#endif
+		
 	}
 	#pragma endregion
 
@@ -952,6 +961,21 @@ namespace Logic
 		}
 
 		return allBrewable;
+	}
+
+	void GraphInfoDump(const Graph& graph)
+	{
+		if constexpr (kGraphInfoDump && DEBUG)
+		{
+			dbg.Print("Graph size: %d.\n", graph.distanceList.size());
+
+			int maxDepth = 0;
+			for (const auto& vertex : graph.distanceList)
+			{
+				maxDepth = std::max(maxDepth, vertex.second.first);
+			}
+			dbg.Print("Max depth: %d.\n", maxDepth);
+		}
 	}
 
 	void BrewPathsDump(const std::vector<std::pair<const decltype(Graph::distanceList)::value_type&, const Action*>>& allBrewable)
@@ -1063,7 +1087,7 @@ namespace Logic
 		}
 
 		auto graph = Graph(casts, localInfo.inv, kMaxBfsDepth);
-		dbg.Print("Graph size: %d.\n", graph.distanceList.size());
+		GraphInfoDump(graph);
 
 		auto brewHunt = TryHuntBrew(graph.distanceList, brews);
 		if (brewHunt.has_value())
@@ -1135,7 +1159,7 @@ namespace Reading
 	{
 		std::copy_if(source.begin(), source.end(), std::back_inserter(destination), [targetName](const Action& obj) {
 			return obj.actionType == targetName;
-			});
+		});
 		for (size_t i = 0; i < destination.size(); i++)
 		{
 			destination[i].position = i;
@@ -1207,21 +1231,37 @@ int main()
 {
 	auto startTime = ChronoClock::now();
 	#if 0
+	for (size_t i = 0; i < 1000; i++)
 	{
+		auto brews = ActionsContainer();
+		std::transform(Deck::orders.begin(), Deck::orders.end(), std::back_inserter(brews), [](const auto& obj) {
+			return Action(obj.first, obj.second);
+		});
+		std::shuffle(brews.begin(), brews.end(), gRng);
+		brews.resize(kClientsInHutCapacity);
+		std::for_each(brews.begin(), brews.end(), [i=0](Action& brew) mutable {
+			brew.position = brew.actionId = i++;
+		});
+
 		auto casts = ActionsContainer();
-		casts.emplace_back(IngredientsContainer{ 2, 0, 0, 0 }, true, false);
-		casts.emplace_back(IngredientsContainer{ -1, 1, 0, 0 }, true, false);
-		casts.emplace_back(IngredientsContainer{ 0, -1, 1, 0 }, true, false);
-		casts.emplace_back(IngredientsContainer{ 0, 0, -1, 1 }, true, false);
-		auto n = kStopLearningAfter - casts.size();
-		for (size_t i = 0; i < n; i++)
-		{
-			casts.emplace_back(Deck::tome[i], true, true);
-		}
-		auto graph = Logic::Graph(casts, IngredientsContainer{ 3, 0, 0, 0 }, 6);
-		dbg.Print("%d\n", graph.distancesList.size());
+		std::transform(Deck::tome.begin(), Deck::tome.end(), std::back_inserter(casts), [](const auto& obj) {
+			return Action(obj, true, true);
+		});
+		std::shuffle(casts.begin(), casts.end(), gRng);
+		casts.resize(kStopLearningAfter - 4);
+		casts.emplace(casts.begin() + 0, IngredientsContainer{ 2, 0, 0, 0 }, true, false);
+		casts.emplace(casts.begin() + 1, IngredientsContainer{ -1, 1, 0, 0 }, true, false);
+		casts.emplace(casts.begin() + 2, IngredientsContainer{ 0, -1, 1, 0 }, true, false);
+		casts.emplace(casts.begin() + 3, IngredientsContainer{ 0, 0, -1, 1 }, true, false);
+
+		auto graph = Logic::Graph(casts, IngredientsContainer{ 1, 1, 1, 1 }, kMaxBfsDepth);
+		GraphInfoDump(graph);
+		auto brewHunt = TryHuntBrew(graph.distanceList, brews);
+		dbg.Print("Test time: %f ms.\n", (float)std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
+		dbg.SummarizeAsserts();
 	}
 	#endif
+
 	Logic::DoPreprocessing();
 	float preprocessingTime = (float)std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count();
 	dbg.Print("Preprocessing used %f ms.\n", preprocessingTime);

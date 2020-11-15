@@ -30,6 +30,7 @@
 #define ASSERTS_ACTIVE 1
 #define DEBUG_IN_RELEASE 1
 #define VECTOR_ASSERTS 1
+#define SHOW_TIME_ANYWAY 1
 #pragma endregion
 
 #pragma region Constants
@@ -48,7 +49,7 @@ constexpr size_t kInventoryCapacity = 10;
 constexpr size_t kClientsInHutCapacity = 5;
 constexpr int kStopLearningAfter = 10;
 constexpr int kMaxBfsDepth = 999999;
-constexpr int kGraphSizeCut = 12000;
+constexpr int kGraphSizeCut = 10000;
 constexpr int kMaxEdgesFromVertex = kStopLearningAfter + 1;
 #pragma endregion
 
@@ -56,7 +57,7 @@ using IngredientsContainer = std::array<int, kIngredients>;
 using ChronoClock = std::chrono::high_resolution_clock;
 
 #pragma region Globals
-std::mt19937 gRng(1);
+std::mt19937 gRng(5);
 std::mt19937 gNotDetRng((uint32_t)ChronoClock::now().time_since_epoch().count()); // not deterministic random (seeded with time)
 float gIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
 #pragma endregion
@@ -582,7 +583,7 @@ struct Action
 	int position = -1; // index in vector
 
 	// For debug.
-	#if (defined(_DEBUG) or defined(NDEBUG)) and 1
+	#if (defined(_DEBUG) or defined(NDEBUG))
 	Action()
 	{
 	}
@@ -594,6 +595,18 @@ struct Action
 
 	Action(const IngredientsContainer& delta, int price)
 		: delta(delta), price(price)
+	{
+	}
+
+	// Brew.
+	Action(int actionId, const IngredientsContainer& delta, int price, int position)
+		: actionId(actionId), delta(delta), price(price), position(position)
+	{
+	}
+
+	// Cast.
+	Action(int actionId, const IngredientsContainer& delta, int price, int castable, int repeatable, int position)
+		: actionId(actionId), delta(delta), price(price), castable(castable), repeatable(repeatable), position(position)
 	{
 	}
 	#endif
@@ -898,13 +911,6 @@ namespace Logic
 	};
 	#pragma endregion
 
-	#pragma region Preprocessing
-	void DoPreprocessing()
-	{
-		
-	}
-	#pragma endregion
-
 	#pragma region Main
 	const Action* BestBrewableFromPath(const decltype(Graph::distanceList)::value_type& path, const ActionsContainer& brews)
 	{
@@ -1125,15 +1131,58 @@ namespace Logic
 #pragma region DebuggerDump
 namespace DebuggerDump
 {
-	void Actions(const ActionsContainer& actions)
+	std::string IngredientsContainerToString(const IngredientsContainer& obj)
+	{
+		std::ostringstream ss;
+		ss << "IngredientsContainer";
+		ss << "{ ";
+		for (size_t i = 0; i < obj.size(); i++)
+		{
+			if (i)
+			{
+				ss << ", ";
+			}
+			ss << obj[i];
+		}
+		ss << " }";
+		return ss.str();
+	}
+
+	void Actions(const ActionsContainer& brews, const ActionsContainer& casts, const IngredientsContainer& inventory)
 	{
 		if constexpr (kActionsDump && DEBUG)
 		{
-			for (auto& it : actions)
+			dbg.Separator();
+
+			for (const auto& brew : brews)
 			{
-				dbg.Print("Id: %d, t: %s, p: %d, c: %d, r: %d.\n", it.actionId, it.actionType.c_str(),
-					it.price, it.castable, it.repeatable);
+				dbg.Print("brews.emplace_back(%d, %s, %d, %d);\n",
+					brew.actionId,
+					IngredientsContainerToString(brew.delta).c_str(),
+					brew.price,
+					brew.position
+				);
 			}
+
+			dbg.NewLine();
+
+			for (const auto& cast : casts)
+			{
+				dbg.Print("casts.emplace_back(%d, %s, %d, %d, %d, %d);\n",
+					cast.actionId,
+					IngredientsContainerToString(cast.delta).c_str(),
+					cast.price,
+					cast.castable,
+					cast.repeatable,
+					cast.position
+				);
+			}
+
+			dbg.NewLine();
+
+			dbg.Print("inventory = %s;\n", IngredientsContainerToString(inventory).c_str());
+
+			dbg.Separator();
 		}
 	}
 
@@ -1174,8 +1223,6 @@ namespace Reading
 		actions.reserve(actionCount);
 		std::generate_n(std::back_inserter(actions), actionCount, []() { return Action(std::cin); });
 
-		DebuggerDump::Actions(actions);
-
 		ClassifyAction(actions, brews, "BREW");
 		ClassifyAction(actions, casts, "CAST");
 		ClassifyAction(actions, opponent_casts, "OPPONENT_CAST");
@@ -1192,6 +1239,7 @@ namespace Reading
 		localInfo = PlayerInfo(std::cin);
 		enemyInfo = PlayerInfo(std::cin);
 
+		DebuggerDump::Actions(brews, casts, localInfo.inv);
 		DebuggerDump::Profit(kTomeProfitDump, learns, "tome");
 		DebuggerDump::Profit(kEnemyCastsProfitDump, opponent_casts, "enemy cast");
 	}
@@ -1231,47 +1279,48 @@ int main()
 {
 	auto startTime = ChronoClock::now();
 	#if 0
-	for (size_t i = 0; i < 1000; i++)
+	for (size_t i = 0; i < 1; i++)
 	{
 		auto brews = ActionsContainer();
-		std::transform(Deck::orders.begin(), Deck::orders.end(), std::back_inserter(brews), [](const auto& obj) {
-			return Action(obj.first, obj.second);
-		});
-		std::shuffle(brews.begin(), brews.end(), gRng);
-		brews.resize(kClientsInHutCapacity);
-		std::for_each(brews.begin(), brews.end(), [i=0](Action& brew) mutable {
-			brew.position = brew.actionId = i++;
-		});
-
 		auto casts = ActionsContainer();
-		std::transform(Deck::tome.begin(), Deck::tome.end(), std::back_inserter(casts), [](const auto& obj) {
-			return Action(obj, true, true);
-		});
-		std::shuffle(casts.begin(), casts.end(), gRng);
-		casts.resize(kStopLearningAfter - 4);
-		casts.emplace(casts.begin() + 0, IngredientsContainer{ 2, 0, 0, 0 }, true, false);
-		casts.emplace(casts.begin() + 1, IngredientsContainer{ -1, 1, 0, 0 }, true, false);
-		casts.emplace(casts.begin() + 2, IngredientsContainer{ 0, -1, 1, 0 }, true, false);
-		casts.emplace(casts.begin() + 3, IngredientsContainer{ 0, 0, -1, 1 }, true, false);
+		auto inventory = IngredientsContainer();
 
-		auto graph = Logic::Graph(casts, IngredientsContainer{ 1, 1, 1, 1 }, kMaxBfsDepth);
+// 		std::transform(Deck::orders.begin(), Deck::orders.end(), std::back_inserter(brews), [](const auto& obj) {
+// 			return Action(obj.first, obj.second);
+// 		});
+// 		std::shuffle(brews.begin(), brews.end(), gRng);
+// 		brews.resize(kClientsInHutCapacity);
+// 		std::for_each(brews.begin(), brews.end(), [i=0](Action& brew) mutable {
+// 			brew.position = brew.actionId = i++;
+// 		});
+// 
+// 		std::transform(Deck::tome.begin(), Deck::tome.end(), std::back_inserter(casts), [](const auto& obj) {
+// 			return Action(obj, true, true);
+// 		});
+// 		std::shuffle(casts.begin(), casts.end(), gRng);
+// 		casts.resize(kStopLearningAfter - 4);
+// 		casts.emplace(casts.begin() + 0, IngredientsContainer{ 2, 0, 0, 0 }, true, false);
+// 		casts.emplace(casts.begin() + 1, IngredientsContainer{ -1, 1, 0, 0 }, true, false);
+// 		casts.emplace(casts.begin() + 2, IngredientsContainer{ 0, -1, 1, 0 }, true, false);
+// 		casts.emplace(casts.begin() + 3, IngredientsContainer{ 0, 0, -1, 1 }, true, false);
+// 
+// 		inventory = { 1, 1, 1, 1 };
+
+		auto graph = Logic::Graph(casts, inventory, kMaxBfsDepth);
 		GraphInfoDump(graph);
 		auto brewHunt = TryHuntBrew(graph.distanceList, brews);
-		dbg.Print("Test time: %f ms.\n", (float)std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
-		dbg.SummarizeAsserts();
 	}
+	dbg.SummarizeAsserts();
+	fprintf(stderr, "Test time: %lld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
+	__debugbreak();
 	#endif
-
-	Logic::DoPreprocessing();
-	float preprocessingTime = (float)std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count();
-	dbg.Print("Preprocessing used %f ms.\n", preprocessingTime);
 
 	for (int moveNumber = 1; ; moveNumber++)
 	{
 		ActionsContainer brews, casts, opponent_casts, learns;
 		PlayerInfo localInfo, enemyInfo;
 		Reading::Do(brews, casts, opponent_casts, learns, localInfo, enemyInfo);
-		#if DEBUG
+		#if DEBUG or SHOW_TIME_ANYWAY
 		startTime = ChronoClock::now();
 		#endif
 
@@ -1286,16 +1335,19 @@ int main()
 		dbg.Print("Idle counter: %d.\n", debugIdleCounter);
 		dbg.Print("Blind cast counter: %d.\n", debugBlindCastCounter);
 		dbg.SummarizeAsserts();
-		float timePassed = (float)std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count();
-		static float maxTime = 0.0;
+		#endif
+
+		#if DEBUG or SHOW_TIME_ANYWAY
+		auto timePassed = std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count();
+		static decltype(timePassed) maxTime = 0;
 		if (moveNumber == 1)
 		{
-			dbg.Print("Used %f (+%f) ms on the first move.\n", timePassed, preprocessingTime);
+			fprintf(stderr, "Used %lld ms on the first move.\n", timePassed);
 		}
 		else
 		{
 			maxTime = std::max(maxTime, timePassed);
-			dbg.Print("Used %f ms. Max used %f ms.\n", timePassed, maxTime);
+			fprintf(stderr, "Used %lld ms. Max used %lld ms.\n", timePassed, maxTime);
 		}
 		#endif
 	}

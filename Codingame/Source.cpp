@@ -568,10 +568,12 @@ struct Action
 	int position = -1; // index in vector
 
 	// For debug.
+	#if 0
 	Action(const IngredientsContainer& delta, bool castable, bool repeatable)
 		: delta(delta), castable(castable), repeatable(repeatable)
 	{
 	}
+	#endif
 
 	Action(std::istream& in)
 	{
@@ -964,9 +966,27 @@ namespace Logic
 		return std::make_tuple(currentVertex.second.edgeType, currentVertex.second.performedAction);
 	}
 
+	const Action* TryBlindCast(const ActionsContainer& casts, const IngredientsContainer& inventory)
+	{
+		auto castableRn = casts;
+		castableRn.erase(std::remove_if(castableRn.begin(), castableRn.end(), [&inventory](const Action& cast) {
+			return !CanCast(cast, inventory);
+		}), castableRn.end());
+
+		if (castableRn.empty())
+		{
+			dbg.Print("Unable to do blind cast.\n");
+			return nullptr;
+		}
+
+		return &*max_element(castableRn.begin(), castableRn.end(), [](const Action& lhs, const Action& rhs) {
+			return IngredientsWorth(lhs.delta) < IngredientsWorth(rhs.delta);
+		});
+	}
+
 	std::string DoMain(int moveNumber, PlayerInfo& localInfo, PlayerInfo& enemyInfo, const ActionsContainer& brews,
 		const ActionsContainer& casts, const ActionsContainer& opponent_casts, const ActionsContainer& learns,
-		int& debugIdleCounter)
+		int& debugIdleCounter, int& debugBlindCastCounter)
 	{
 		static auto enemyTracker = EnemyTracker();
 		static auto myselfTracker = EnemyTracker();
@@ -1001,6 +1021,13 @@ namespace Logic
 				ASSERT(false, "Unknown edge in brew hunt.\n");
 				break;
 			}
+		}
+
+		if (auto blindCast = TryBlindCast(casts, localInfo.inv))
+		{
+			debugBlindCastCounter++;
+			dbg.Print("Doing blind cast.\n");
+			return std::string("CAST ") + std::to_string(blindCast->actionId) + " 1";
 		}
 
 		debugIdleCounter++;
@@ -1151,12 +1178,15 @@ int main()
 		#endif
 
 		static int debugIdleCounter = 0;
-		std::string answer = Logic::DoMain(moveNumber, localInfo, enemyInfo, brews, casts, opponent_casts, learns, debugIdleCounter);
+		static int debugBlindCastCounter = 0;
+		std::string answer = Logic::DoMain(moveNumber, localInfo, enemyInfo, brews, casts, opponent_casts, learns, 
+			debugIdleCounter, debugBlindCastCounter);
 
 		Submitting::Submit(answer, moveNumber);
 
 		#if DEBUG
 		dbg.Print("Idle counter: %d.\n", debugIdleCounter);
+		dbg.Print("Blind cast counter: %d.\n", debugBlindCastCounter);
 		dbg.SummarizeAsserts();
 		float timePassed = (float)std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count();
 		static float maxTime = 0.0;

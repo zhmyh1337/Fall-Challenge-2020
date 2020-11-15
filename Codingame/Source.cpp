@@ -25,14 +25,18 @@
 #pragma endregion
 
 #pragma region Constants
+#pragma region Dumps
 constexpr bool kActionsDump = false;
 constexpr bool kTomeProfitDump = false;
-constexpr bool kEnemyCastsProfitDump = true;
+constexpr bool kEnemyCastsProfitDump = false;
+constexpr bool kBrewPathsDump = true;
+#pragma endregion
 constexpr bool kShowHelloMessage = true;
 constexpr bool kSing = true;
 constexpr const char* kHelloMessage = "Кулити";
 constexpr size_t kIngredients = 4;
 constexpr size_t kInventoryCapacity = 10;
+constexpr size_t kClientsInHutCapacity = 5;
 constexpr int kStopLearningAfter = 10;
 constexpr int kMaxBfsDepth = 7;
 #pragma endregion
@@ -913,24 +917,72 @@ namespace Logic
 		return result;
 	}
 
-	bool ComparePathsToBrew(const decltype(Graph::distanceList)::value_type& lhs,
-							const decltype(Graph::distanceList)::value_type& rhs,
-							const ActionsContainer& brews)
+	inline float CalculateBrewPathWorth(int price, int depth)
 	{
-		auto leftBestBrewable = BestBrewableFromPath(lhs, brews);
-		auto rightBestBrewable = BestBrewableFromPath(rhs, brews);
+		return (float)price / (depth + 1);
+	}
+
+	bool ComparePathsToBrew(std::pair<const decltype(Graph::distanceList)::value_type&, const Action*> lhs,
+							std::pair<const decltype(Graph::distanceList)::value_type&, const Action*> rhs)
+	{
+		auto leftPathWorth = CalculateBrewPathWorth(lhs.second->price, lhs.first.second.first);
+		auto rightPathWorth = CalculateBrewPathWorth(rhs.second->price, rhs.first.second.first);
 
 		return
-			!leftBestBrewable ||
-			rightBestBrewable && (
-				lhs.second.first > rhs.second.first ||
-				lhs.second.first == rhs.second.first && (
-					leftBestBrewable->price < rightBestBrewable->price ||
-					leftBestBrewable->price == rightBestBrewable->price && (
-						IngredientsWorth(leftBestBrewable->delta) > IngredientsWorth(rightBestBrewable->delta)
-					)
+			leftPathWorth < rightPathWorth ||
+			leftPathWorth == rightPathWorth && (
+				lhs.second->price < rhs.second->price ||
+				lhs.second->price == rhs.second->price && (
+					IngredientsWorth(lhs.second->delta) > IngredientsWorth(rhs.second->delta)
 				)
 			);
+	}
+
+	auto GetAllBrewable(const decltype(Graph::distanceList)& distanceList, const ActionsContainer& brews)
+	{
+		std::vector<std::pair<const std::remove_reference<decltype(distanceList)>::type::value_type&, const Action*>> allBrewable;
+
+		for (const auto& vertex : distanceList)
+		{
+			auto bestBrewable = BestBrewableFromPath(vertex, brews);
+			if (bestBrewable != nullptr)
+			{
+				allBrewable.emplace_back(vertex, bestBrewable);
+			}
+		}
+
+		return allBrewable;
+	}
+
+	void BrewPathsDump(const std::vector<std::pair<const decltype(Graph::distanceList)::value_type&, const Action*>>& allBrewable)
+	{
+		if constexpr (kBrewPathsDump && DEBUG)
+		{
+			std::array<std::remove_const<std::remove_reference<decltype(allBrewable)>::type>::type, kClientsInHutCapacity> brewLists;
+			for (const auto& brew : allBrewable)
+			{
+				brewLists[brew.second->position].push_back(brew);
+			}
+			for (const auto& brewList : brewLists)
+			{
+				if (brewList.empty())
+				{
+					dbg.Print("No paths to this brew.\n");
+					continue;
+				}
+
+				const auto& bestBrew = *max_element(brewList.begin(), brewList.end(), [](const auto& lhs, const auto& rhs) {
+					return ComparePathsToBrew(lhs, rhs);
+				});
+
+				dbg.Print("Best path to brew %d: price = %d, moves = %d, worth = %f.\n",
+					bestBrew.second->actionId,
+					bestBrew.second->price,
+					bestBrew.first.second.first,
+					CalculateBrewPathWorth(bestBrew.second->price, bestBrew.first.second.first)
+				);
+			}
+		}
 	}
 
 	std::optional<std::tuple<Graph::EdgeType, const Action*>> TryHuntBrew(const decltype(Graph::distanceList)& distanceList,
@@ -938,18 +990,21 @@ namespace Logic
 	{
 		ASSERT(!distanceList.empty());
 
-		const auto& bestHunt = *max_element(distanceList.begin(), distanceList.end(), [&brews](const auto& lhs, const auto& rhs) {
-			return ComparePathsToBrew(lhs, rhs, brews);
-		});
-
-		auto bestBrewable = BestBrewableFromPath(bestHunt, brews);
-		if (bestBrewable == nullptr)
+		auto allBrewable = GetAllBrewable(distanceList, brews);
+		if (allBrewable.empty())
 		{
-			dbg.Print("No way to brew.\n");
+			dbg.Print("No possible brews.\n");
 			return {};
 		}
+		dbg.Print("Possible brew paths: %d.\n", allBrewable.size());
+		BrewPathsDump(allBrewable);
 
-		auto currentVertex = bestHunt.second;
+		const auto& bestHunt = *max_element(allBrewable.begin(), allBrewable.end(), [](const auto& lhs, const auto& rhs) {
+			return ComparePathsToBrew(lhs, rhs);
+		});
+
+		auto bestBrewable = bestHunt.second;
+		auto currentVertex = bestHunt.first.second;
 
 		// Can brew right now.
 		if (currentVertex.second.edgeType == Graph::EdgeType::Root)
@@ -1008,6 +1063,8 @@ namespace Logic
 		}
 
 		auto graph = Graph(casts, localInfo.inv, kMaxBfsDepth);
+		dbg.Print("Graph size: %d.\n", graph.distanceList.size());
+
 		auto brewHunt = TryHuntBrew(graph.distanceList, brews);
 		if (brewHunt.has_value())
 		{
@@ -1046,8 +1103,7 @@ namespace DebuggerDump
 {
 	void Actions(const ActionsContainer& actions)
 	{
-		#if DEBUG
-		if (kActionsDump)
+		if constexpr (kActionsDump && DEBUG)
 		{
 			for (auto& it : actions)
 			{
@@ -1055,7 +1111,6 @@ namespace DebuggerDump
 					it.price, it.castable, it.repeatable);
 			}
 		}
-		#endif
 	}
 
 	void Profit(bool assertion, const ActionsContainer& actions, const char* name)

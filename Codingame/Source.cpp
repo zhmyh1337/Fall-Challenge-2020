@@ -968,9 +968,12 @@ namespace Logic
 
 	const Action* TryBlindCast(const ActionsContainer& casts, const IngredientsContainer& inventory)
 	{
-		auto castableRn = casts;
-		castableRn.erase(std::remove_if(castableRn.begin(), castableRn.end(), [&inventory](const Action& cast) {
-			return !CanCast(cast, inventory);
+		std::vector<const Action*> castableRn;
+		castableRn.reserve(casts.capacity());
+		std::transform(casts.begin(), casts.end(), std::back_inserter(castableRn), [](const Action& cast) { return &cast; });
+
+		castableRn.erase(std::remove_if(castableRn.begin(), castableRn.end(), [&inventory](const Action* cast) {
+			return !CanCast(*cast, inventory);
 		}), castableRn.end());
 
 		if (castableRn.empty())
@@ -979,8 +982,8 @@ namespace Logic
 			return nullptr;
 		}
 
-		return &*max_element(castableRn.begin(), castableRn.end(), [](const Action& lhs, const Action& rhs) {
-			return IngredientsWorth(lhs.delta) < IngredientsWorth(rhs.delta);
+		return *max_element(castableRn.begin(), castableRn.end(), [](const Action* lhs, const Action* rhs) {
+			return IngredientsWorth(lhs->delta) < IngredientsWorth(rhs->delta);
 		});
 	}
 

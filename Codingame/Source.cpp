@@ -485,6 +485,11 @@ namespace my
 			sz++;
 		}
 
+		void clear()
+		{
+			sz = 0;
+		}
+
 		size_t size() const
 		{
 			return sz;
@@ -907,7 +912,13 @@ namespace Logic
 			int timerHelperLastCount = 0;
 			int timerHelperCounter = 0;
 
+			#if 1
+			static std::queue<std::pair<VertexIndexType, int>> q;
+			while (!q.empty()) q.pop();
+			#else
 			std::queue<std::pair<VertexIndexType, int>> q;
+			#endif
+
 			q.emplace(startVertex, distanceList[startVertex].first);
 			while (!q.empty())
 			{
@@ -988,7 +999,7 @@ namespace Logic
 
 	inline float CalculateBrewPathWorth(int price, int depth)
 	{
-		return (float)price / (depth + 1);
+		return price - depth * 1.5f;
 	}
 
 	bool ComparePathsToBrew(std::pair<const decltype(Graph::distanceList)::value_type&, const Action*> lhs,
@@ -1007,9 +1018,10 @@ namespace Logic
 			);
 	}
 
-	auto GetAllBrewable(const decltype(Graph::distanceList)& distanceList, const ActionsContainer& brews)
+	const auto& GetAllBrewable(const decltype(Graph::distanceList)& distanceList, const ActionsContainer& brews)
 	{
-		std::vector<std::pair<const std::remove_reference<decltype(distanceList)>::type::value_type&, const Action*>> allBrewable;
+		static std::vector<std::pair<const std::remove_reference<decltype(distanceList)>::type::value_type&, const Action*>> allBrewable;
+		allBrewable.clear();
 
 		for (const auto& vertex : distanceList)
 		{
@@ -1074,7 +1086,7 @@ namespace Logic
 	{
 		ASSERT(!distanceList.empty());
 
-		auto allBrewable = GetAllBrewable(distanceList, brews);
+		const auto& allBrewable = GetAllBrewable(distanceList, brews);
 		if (allBrewable.empty())
 		{
 			dbg.Print("No possible brews.\n");
@@ -1339,7 +1351,8 @@ void Preprocessing()
 	#if LOCAL_MACHINE and 1
 	{
 		auto startTime = ChronoClock::now();
-		for (size_t i = 0; i < 100; i++)
+		std::vector<int64_t> allTimeDeltas, allGraphTimeDeltas, allBrewHuntDeltas;
+		for (size_t i = 0; i < 200; i++)
 		{
 			gMoveBeginTimePoint = ChronoClock::now();
 
@@ -1368,29 +1381,44 @@ void Preprocessing()
 // 	 
 // 	 		inventory = { 1, 1, 1, 1 };
 
-			brews.emplace_back(64, IngredientsContainer{ 0, 0, -2, -3 }, 21, 0);
-			brews.emplace_back(44, IngredientsContainer{ 0, -4, 0, 0 }, 9, 1);
-			brews.emplace_back(49, IngredientsContainer{ 0, -5, 0, 0 }, 10, 2);
-			brews.emplace_back(61, IngredientsContainer{ 0, 0, 0, -4 }, 16, 3);
-			brews.emplace_back(53, IngredientsContainer{ 0, 0, -4, 0 }, 12, 4);
-			casts.emplace_back(78, IngredientsContainer{ 2, 0, 0, 0 }, 0, 0, 0, 0);
+			brews.emplace_back(62, IngredientsContainer{ 0, -2, 0, -3 }, 19, 0);
+			brews.emplace_back(66, IngredientsContainer{ -2, -1, 0, -1 }, 10, 1);
+			brews.emplace_back(73, IngredientsContainer{ -1, -1, -1, -1 }, 12, 2);
+			brews.emplace_back(65, IngredientsContainer{ 0, 0, 0, -5 }, 20, 3);
+			brews.emplace_back(67, IngredientsContainer{ 0, -2, -1, -1 }, 12, 4);
+			casts.emplace_back(78, IngredientsContainer{ 2, 0, 0, 0 }, 0, 1, 0, 0);
 			casts.emplace_back(79, IngredientsContainer{ -1, 1, 0, 0 }, 0, 1, 0, 1);
 			casts.emplace_back(80, IngredientsContainer{ 0, -1, 1, 0 }, 0, 1, 0, 2);
 			casts.emplace_back(81, IngredientsContainer{ 0, 0, -1, 1 }, 0, 1, 0, 3);
-			casts.emplace_back(86, IngredientsContainer{ 3, 0, 0, 0 }, 0, 0, 0, 4);
-			casts.emplace_back(88, IngredientsContainer{ 2, -2, 0, 1 }, 0, 1, 1, 5);
-			casts.emplace_back(90, IngredientsContainer{ 0, 0, 2, -1 }, 0, 1, 1, 6);
-			casts.emplace_back(91, IngredientsContainer{ 0, 0, -3, 3 }, 0, 1, 1, 7);
-			casts.emplace_back(92, IngredientsContainer{ -4, 0, 1, 1 }, 0, 1, 1, 8);
-			casts.emplace_back(94, IngredientsContainer{ 0, 0, -2, 2 }, 0, 1, 1, 9);
-			inventory = IngredientsContainer{ 6, 0, 0, 0 };
+			casts.emplace_back(86, IngredientsContainer{ -2, 0, 1, 0 }, 0, 0, 1, 4);
+			casts.emplace_back(88, IngredientsContainer{ 0, 2, -2, 1 }, 0, 1, 1, 5);
+			casts.emplace_back(90, IngredientsContainer{ 1, -3, 1, 1 }, 0, 1, 1, 6);
+			casts.emplace_back(92, IngredientsContainer{ 0, 3, 2, -2 }, 0, 0, 1, 7);
+			casts.emplace_back(94, IngredientsContainer{ 0, 2, 0, 0 }, 0, 1, 0, 8);
+			casts.emplace_back(95, IngredientsContainer{ -2, 0, -1, 2 }, 0, 0, 1, 9);
+			inventory = IngredientsContainer{ 0, 3, 0, 0 };
 
+			auto _1 = ChronoClock::now();
 			auto graph = Logic::Graph(casts, inventory);
+			allGraphTimeDeltas.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - _1).count());
+
 			GraphInfoDump(graph);
+			auto _2 = ChronoClock::now();
 			auto brewHunt = TryHuntBrew(graph.distanceList, brews);
+			allBrewHuntDeltas.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - _2).count());
+			allTimeDeltas.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - gMoveBeginTimePoint).count());
 		}
 		dbg.SummarizeAsserts();
-		fprintf(stderr, "Test time: %lld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
+		fprintf(stderr, "Test time: %lld ms.\n\n", std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
+		fprintf(stderr, "Max time: %lld ms.\n", *std::max_element(allTimeDeltas.begin(), allTimeDeltas.end()));
+		fprintf(stderr, "Idmax time: %d.\n", std::max_element(allTimeDeltas.begin(), allTimeDeltas.end()) - allTimeDeltas.begin());
+		fprintf(stderr, "Average time: %f ms.\n\n", (float)std::accumulate(allTimeDeltas.begin(), allTimeDeltas.end(), 0ll) / allTimeDeltas.size());
+		fprintf(stderr, "Max graph time: %lld ms.\n", *std::max_element(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end()));
+		fprintf(stderr, "Idmax graph time: %d.\n", std::max_element(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end()) - allGraphTimeDeltas.begin());
+		fprintf(stderr, "Average graph time: %f ms.\n\n", (float)std::accumulate(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end(), 0ll) / allGraphTimeDeltas.size());
+		fprintf(stderr, "Max hunt time: %lld ms.\n", *std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()));
+		fprintf(stderr, "Idmax hunt time: %d.\n", std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()) - allBrewHuntDeltas.begin());
+		fprintf(stderr, "Average hunt time: %f ms.\n\n", (float)std::accumulate(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end(), 0ll) / allBrewHuntDeltas.size());
 		__debugbreak();
 	}
 	#endif

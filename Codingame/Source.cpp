@@ -17,8 +17,14 @@
 #include <optional>
 #pragma endregion
 
+#if defined(_DEBUG) or defined(NDEBUG)
+#define LOCAL_MACHINE 1
+#else
+#define LOCAL_MACHINE 0
+#endif
+
 #pragma region Pragmas
-#if not defined(_DEBUG) and not defined(NDEBUG)
+#if not LOCAL_MACHINE
 #pragma GCC optimize "Ofast,unroll-loops,omit-frame-pointer,inline"
 #pragma GCC option("arch=native", "tune=native", "no-zero-upper")
 #pragma GCC target("rdrnd", "popcnt", "avx", "bmi2")
@@ -27,11 +33,14 @@
 
 #pragma region ChangeableMacros
 #define DEBUG_ACTIVE 1
+#define TIMERS_ACTIVE 1
 #define ASSERTS_ACTIVE 1
 #define DEBUG_IN_RELEASE 1
 #define VECTOR_ASSERTS 1
 #define SHOW_TIME_ANYWAY 1
 #pragma endregion
+
+using ChronoClock = std::chrono::high_resolution_clock;
 
 #pragma region Constants
 #pragma region Dumps
@@ -48,18 +57,19 @@ constexpr size_t kIngredients = 4;
 constexpr size_t kInventoryCapacity = 10;
 constexpr size_t kClientsInHutCapacity = 5;
 constexpr int kStopLearningAfter = 10;
-constexpr int kMaxBfsDepth = 999999;
-constexpr int kGraphSizeCut = 10000;
+// constexpr int kMaxBfsDepth = 999999;
+// constexpr int kGraphSizeCut = 10000;
+constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 33;
 constexpr int kMaxEdgesFromVertex = kStopLearningAfter + 1;
 #pragma endregion
 
 using IngredientsContainer = std::array<int, kIngredients>;
-using ChronoClock = std::chrono::high_resolution_clock;
 
 #pragma region Globals
 std::mt19937 gRng(5);
 std::mt19937 gNotDetRng((uint32_t)ChronoClock::now().time_since_epoch().count()); // not deterministic random (seeded with time)
 float gIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
+ChronoClock::time_point gMoveBeginTimePoint;
 #pragma endregion
 
 #pragma region Hardcode
@@ -439,6 +449,7 @@ namespace my
 {
 	#pragma warning(push)
 	#pragma warning(disable : 6385)
+	#pragma warning(disable : 6386)
 	template<typename T, size_t capacity>
 	class vector
 	{
@@ -566,6 +577,40 @@ namespace my
 		}
 	};
 	#pragma warning(pop)
+
+	#pragma warning(push)
+	#pragma warning(disable : 26495)
+	class timer
+	{
+	public:
+		#if TIMERS_ACTIVE
+		timer(const char* name)
+			: _name(name), _startPoint(ChronoClock::now())
+		{
+		}
+
+		void time_passed()
+		{
+			fprintf(stderr, "Scope \"%s\" used %lld ms.\n",
+				_name,
+				std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - _startPoint).count()
+			);
+		}
+		#else
+		timer(const char*)
+		{
+		}
+
+		void time_passed()
+		{
+		}
+		#endif
+
+	private:
+		const char* _name;
+		ChronoClock::time_point _startPoint;
+	};
+	#pragma warning(pop)
 }
 #pragma endregion
 
@@ -583,7 +628,7 @@ struct Action
 	int position = -1; // index in vector
 
 	// For debug.
-	#if (defined(_DEBUG) or defined(NDEBUG))
+	#if LOCAL_MACHINE
 	Action()
 	{
 	}
@@ -807,13 +852,13 @@ namespace Logic
 			}
 		};
 
-		Graph(const ActionsContainer& casts, const IngredientsContainer& inventory, int maxDepth)
+		Graph(const ActionsContainer& casts, const IngredientsContainer& inventory)
 			: _castsCount(casts.size())
 		{
 			auto startVertex = ToVertexIndex(inventory, CastableMaskFromCasts(casts));
 			distanceList[startVertex] = std::make_pair(0, ReverseEdge(EdgeType::Root, startVertex));
 
-			BFS(startVertex, maxDepth, casts);
+			BFS(startVertex, casts);
 		}
 
 		static inline IngredientsContainer InventoryFromVertexIndex(VertexIndexType index)
@@ -857,18 +902,27 @@ namespace Logic
 			return edges;
 		}
 
-		void BFS(VertexIndexType startVertex, int maxDepth, const ActionsContainer& casts)
+		void BFS(VertexIndexType startVertex, const ActionsContainer& casts)
 		{
+			int timerHelperLastCount = 0;
+			int timerHelperCounter = 0;
+
 			std::queue<std::pair<VertexIndexType, int>> q;
 			q.emplace(startVertex, distanceList[startVertex].first);
 			while (!q.empty())
 			{
 				auto [vertex, distance] = q.front();
 				q.pop();
-				if (distance == maxDepth || distanceList.size() > kGraphSizeCut)
+
+				if (++timerHelperCounter - timerHelperLastCount > 100)
 				{
-					continue;
+					timerHelperLastCount = timerHelperCounter;
+					if (std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - gMoveBeginTimePoint).count() >= kGraphTimeLimit)
+					{
+						return;
+					}
 				}
+
 				for (auto [edgeType, newVertex, performedAction] : GetEdgesOfVertex(vertex, casts))
 				{
 					auto it = distanceList.find(newVertex);
@@ -1092,10 +1146,14 @@ namespace Logic
 			return std::string("LEARN ") + std::to_string(learns.front().actionId);
 		}
 
-		auto graph = Graph(casts, localInfo.inv, kMaxBfsDepth);
+		my::timer graphTimer("graph");
+		auto graph = Graph(casts, localInfo.inv);
 		GraphInfoDump(graph);
+		graphTimer.time_passed();
 
+		my::timer brewHuntTimer("brew hunt");
 		auto brewHunt = TryHuntBrew(graph.distanceList, brews);
+		brewHuntTimer.time_passed();
 		if (brewHunt.has_value())
 		{
 			auto [edgeType, actionToPerform] = *brewHunt;
@@ -1275,54 +1333,79 @@ namespace Submitting
 }
 #pragma endregion
 
+// Mostly for testing (sandbox).
+void Preprocessing()
+{
+	#if LOCAL_MACHINE and 1
+	{
+		auto startTime = ChronoClock::now();
+		for (size_t i = 0; i < 100; i++)
+		{
+			gMoveBeginTimePoint = ChronoClock::now();
+
+			auto brews = ActionsContainer();
+			auto casts = ActionsContainer();
+			auto inventory = IngredientsContainer();
+
+// 	 		std::transform(Deck::orders.begin(), Deck::orders.end(), std::back_inserter(brews), [](const auto& obj) {
+// 	 			return Action(obj.first, obj.second);
+// 	 		});
+// 	 		std::shuffle(brews.begin(), brews.end(), gRng);
+// 	 		brews.resize(kClientsInHutCapacity);
+// 	 		std::for_each(brews.begin(), brews.end(), [i=0](Action& brew) mutable {
+// 	 			brew.position = brew.actionId = i++;
+// 	 		});
+// 	 
+// 	 		std::transform(Deck::tome.begin(), Deck::tome.end(), std::back_inserter(casts), [](const auto& obj) {
+// 	 			return Action(obj, true, true);
+// 	 		});
+// 	 		std::shuffle(casts.begin(), casts.end(), gRng);
+// 	 		casts.resize(kStopLearningAfter - 4);
+// 	 		casts.emplace(casts.begin() + 0, IngredientsContainer{ 2, 0, 0, 0 }, true, false);
+// 	 		casts.emplace(casts.begin() + 1, IngredientsContainer{ -1, 1, 0, 0 }, true, false);
+// 	 		casts.emplace(casts.begin() + 2, IngredientsContainer{ 0, -1, 1, 0 }, true, false);
+// 	 		casts.emplace(casts.begin() + 3, IngredientsContainer{ 0, 0, -1, 1 }, true, false);
+// 	 
+// 	 		inventory = { 1, 1, 1, 1 };
+
+			brews.emplace_back(64, IngredientsContainer{ 0, 0, -2, -3 }, 21, 0);
+			brews.emplace_back(44, IngredientsContainer{ 0, -4, 0, 0 }, 9, 1);
+			brews.emplace_back(49, IngredientsContainer{ 0, -5, 0, 0 }, 10, 2);
+			brews.emplace_back(61, IngredientsContainer{ 0, 0, 0, -4 }, 16, 3);
+			brews.emplace_back(53, IngredientsContainer{ 0, 0, -4, 0 }, 12, 4);
+			casts.emplace_back(78, IngredientsContainer{ 2, 0, 0, 0 }, 0, 0, 0, 0);
+			casts.emplace_back(79, IngredientsContainer{ -1, 1, 0, 0 }, 0, 1, 0, 1);
+			casts.emplace_back(80, IngredientsContainer{ 0, -1, 1, 0 }, 0, 1, 0, 2);
+			casts.emplace_back(81, IngredientsContainer{ 0, 0, -1, 1 }, 0, 1, 0, 3);
+			casts.emplace_back(86, IngredientsContainer{ 3, 0, 0, 0 }, 0, 0, 0, 4);
+			casts.emplace_back(88, IngredientsContainer{ 2, -2, 0, 1 }, 0, 1, 1, 5);
+			casts.emplace_back(90, IngredientsContainer{ 0, 0, 2, -1 }, 0, 1, 1, 6);
+			casts.emplace_back(91, IngredientsContainer{ 0, 0, -3, 3 }, 0, 1, 1, 7);
+			casts.emplace_back(92, IngredientsContainer{ -4, 0, 1, 1 }, 0, 1, 1, 8);
+			casts.emplace_back(94, IngredientsContainer{ 0, 0, -2, 2 }, 0, 1, 1, 9);
+			inventory = IngredientsContainer{ 6, 0, 0, 0 };
+
+			auto graph = Logic::Graph(casts, inventory);
+			GraphInfoDump(graph);
+			auto brewHunt = TryHuntBrew(graph.distanceList, brews);
+		}
+		dbg.SummarizeAsserts();
+		fprintf(stderr, "Test time: %lld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
+		__debugbreak();
+	}
+	#endif
+}
+
 int main()
 {
-	auto startTime = ChronoClock::now();
-	#if 0
-	for (size_t i = 0; i < 1; i++)
-	{
-		auto brews = ActionsContainer();
-		auto casts = ActionsContainer();
-		auto inventory = IngredientsContainer();
-
-// 		std::transform(Deck::orders.begin(), Deck::orders.end(), std::back_inserter(brews), [](const auto& obj) {
-// 			return Action(obj.first, obj.second);
-// 		});
-// 		std::shuffle(brews.begin(), brews.end(), gRng);
-// 		brews.resize(kClientsInHutCapacity);
-// 		std::for_each(brews.begin(), brews.end(), [i=0](Action& brew) mutable {
-// 			brew.position = brew.actionId = i++;
-// 		});
-// 
-// 		std::transform(Deck::tome.begin(), Deck::tome.end(), std::back_inserter(casts), [](const auto& obj) {
-// 			return Action(obj, true, true);
-// 		});
-// 		std::shuffle(casts.begin(), casts.end(), gRng);
-// 		casts.resize(kStopLearningAfter - 4);
-// 		casts.emplace(casts.begin() + 0, IngredientsContainer{ 2, 0, 0, 0 }, true, false);
-// 		casts.emplace(casts.begin() + 1, IngredientsContainer{ -1, 1, 0, 0 }, true, false);
-// 		casts.emplace(casts.begin() + 2, IngredientsContainer{ 0, -1, 1, 0 }, true, false);
-// 		casts.emplace(casts.begin() + 3, IngredientsContainer{ 0, 0, -1, 1 }, true, false);
-// 
-// 		inventory = { 1, 1, 1, 1 };
-
-		auto graph = Logic::Graph(casts, inventory, kMaxBfsDepth);
-		GraphInfoDump(graph);
-		auto brewHunt = TryHuntBrew(graph.distanceList, brews);
-	}
-	dbg.SummarizeAsserts();
-	fprintf(stderr, "Test time: %lld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
-	__debugbreak();
-	#endif
+	Preprocessing();
 
 	for (int moveNumber = 1; ; moveNumber++)
 	{
 		ActionsContainer brews, casts, opponent_casts, learns;
 		PlayerInfo localInfo, enemyInfo;
 		Reading::Do(brews, casts, opponent_casts, learns, localInfo, enemyInfo);
-		#if DEBUG or SHOW_TIME_ANYWAY
-		startTime = ChronoClock::now();
-		#endif
+		gMoveBeginTimePoint = ChronoClock::now();
 
 		static int debugIdleCounter = 0;
 		static int debugBlindCastCounter = 0;
@@ -1338,7 +1421,7 @@ int main()
 		#endif
 
 		#if DEBUG or SHOW_TIME_ANYWAY
-		auto timePassed = std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count();
+		auto timePassed = std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - gMoveBeginTimePoint).count();
 		static decltype(timePassed) maxTime = 0;
 		if (moveNumber == 1)
 		{

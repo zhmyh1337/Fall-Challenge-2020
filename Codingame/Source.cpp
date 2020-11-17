@@ -24,7 +24,7 @@
 #endif
 
 #pragma region Pragmas
-#if not LOCAL_MACHINE
+#if not LOCAL_MACHINE and 0
 #pragma GCC optimize "Ofast,unroll-loops,omit-frame-pointer,inline"
 #pragma GCC option("arch=native", "tune=native", "no-zero-upper")
 #pragma GCC target("rdrnd", "popcnt", "avx", "bmi2")
@@ -59,8 +59,9 @@ constexpr size_t kClientsInHutCapacity = 5;
 constexpr int kStopLearningAfter = 10;
 // constexpr int kMaxBfsDepth = 999999;
 // constexpr int kGraphSizeCut = 10000;
-constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 33;
-constexpr int kMaxEdgesFromVertex = kStopLearningAfter + 1;
+constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 25;
+constexpr int kGraphCheckTimeLimitPeriod = 50;
+constexpr int kMaxEdgesFromVertex = kStopLearningAfter * (kInventoryCapacity / 2) + 1;
 #pragma endregion
 
 using IngredientsContainer = std::array<int, kIngredients>;
@@ -824,6 +825,7 @@ namespace Logic
 			EdgeType edgeType;
 			VertexIndexType child;
 			const Action* performedAction;
+			int castTimes;
 
 			#pragma warning(push)
 			#pragma warning(disable : 26495)
@@ -832,8 +834,8 @@ namespace Logic
 			}
 			#pragma warning(pop)
 
-			Edge(EdgeType edgeType, VertexIndexType child, const Action* performedAction = nullptr)
-				: edgeType(edgeType), child(child), performedAction(performedAction)
+			Edge(EdgeType edgeType, VertexIndexType child, const Action* performedAction = nullptr, int castTimes = 0)
+				: edgeType(edgeType), child(child), performedAction(performedAction), castTimes(castTimes)
 			{
 			}
 		};
@@ -843,6 +845,7 @@ namespace Logic
 			EdgeType edgeType;
 			VertexIndexType parent;
 			const Action* performedAction;
+			int castTimes;
 
 			#pragma warning(push)
 			#pragma warning(disable : 26495)
@@ -851,8 +854,8 @@ namespace Logic
 			}
 			#pragma warning(pop)
 
-			ReverseEdge(EdgeType edgeType, VertexIndexType parent, const Action* performedAction = nullptr)
-				: edgeType(edgeType), parent(parent), performedAction(performedAction)
+			ReverseEdge(EdgeType edgeType, VertexIndexType parent, const Action* performedAction = nullptr, int castTimes = 0)
+				: edgeType(edgeType), parent(parent), performedAction(performedAction), castTimes(castTimes)
 			{
 			}
 		};
@@ -895,11 +898,16 @@ namespace Logic
 				if (castableMask & (CastableMaskType)1 << i)
 				{
 					auto newInventory = inventory;
-					ApplyDelta(newInventory, casts[i].delta);
-
-					if (CorrectInventory(newInventory))
+					for (int castTimes = 1; casts[i].repeatable || castTimes == 1; castTimes++)
 					{
-						edges.emplace_back(EdgeType::Cast, ToVertexIndex(newInventory, castableMask ^ (CastableMaskType)1 << i), &casts[i]);
+						ApplyDelta(newInventory, casts[i].delta);
+						if (!CorrectInventory(newInventory))
+						{
+							break;
+						}
+
+						edges.emplace_back(EdgeType::Cast, ToVertexIndex(newInventory, castableMask ^ (CastableMaskType)1 << i),
+							&casts[i], castTimes);
 					}
 				}
 			}
@@ -925,7 +933,7 @@ namespace Logic
 				auto [vertex, distance] = q.front();
 				q.pop();
 
-				if (++timerHelperCounter - timerHelperLastCount > 100)
+				if (++timerHelperCounter - timerHelperLastCount > kGraphCheckTimeLimitPeriod)
 				{
 					timerHelperLastCount = timerHelperCounter;
 					if (std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - gMoveBeginTimePoint).count() >= kGraphTimeLimit)
@@ -934,12 +942,12 @@ namespace Logic
 					}
 				}
 
-				for (auto [edgeType, newVertex, performedAction] : GetEdgesOfVertex(vertex, casts))
+				for (auto [edgeType, newVertex, performedAction, castTimes] : GetEdgesOfVertex(vertex, casts))
 				{
 					auto it = distanceList.find(newVertex);
 					if (it == distanceList.end() || distance + 1 < it->second.first)
 					{
-						distanceList[newVertex] = std::make_pair(distance + 1, ReverseEdge(edgeType, vertex, performedAction));
+						distanceList[newVertex] = std::make_pair(distance + 1, ReverseEdge(edgeType, vertex, performedAction, castTimes));
 						q.emplace(newVertex, distance + 1);
 					}
 				}
@@ -999,7 +1007,7 @@ namespace Logic
 
 	inline float CalculateBrewPathWorth(int price, int depth)
 	{
-		return price - depth * 1.5f;
+		return price - depth * 1.75f;
 	}
 
 	bool ComparePathsToBrew(std::pair<const decltype(Graph::distanceList)::value_type&, const Action*> lhs,
@@ -1081,32 +1089,37 @@ namespace Logic
 		}
 	}
 
-	std::optional<std::tuple<Graph::EdgeType, const Action*>> TryHuntBrew(const decltype(Graph::distanceList)& distanceList,
+	std::optional<std::tuple<Graph::EdgeType, const Action*, int>> TryHuntBrew(const decltype(Graph::distanceList)& distanceList,
 		const ActionsContainer& brews)
 	{
 		ASSERT(!distanceList.empty());
 
+		my::timer getAllBrewableTimer("GetAllBrewable");
 		const auto& allBrewable = GetAllBrewable(distanceList, brews);
+		getAllBrewableTimer.time_passed();
+
+		my::timer afterGetAllBrewableTimer("after GetAllBrewable");
 		if (allBrewable.empty())
 		{
 			dbg.Print("No possible brews.\n");
 			return {};
 		}
 		dbg.Print("Possible brew paths: %d.\n", allBrewable.size());
+
 		BrewPathsDump(allBrewable);
 
 		const auto& bestHunt = *max_element(allBrewable.begin(), allBrewable.end(), [](const auto& lhs, const auto& rhs) {
 			return ComparePathsToBrew(lhs, rhs);
 		});
 
-		auto bestBrewable = bestHunt.second;
+		const auto bestBrewable = bestHunt.second;
 		auto currentVertex = bestHunt.first.second;
 
 		// Can brew right now.
 		if (currentVertex.second.edgeType == Graph::EdgeType::Root)
 		{
 			dbg.Print("Can brew %d right now.\n", bestBrewable->actionId);
-			return std::make_tuple(Graph::EdgeType::Brew, bestBrewable);
+			return std::make_tuple(Graph::EdgeType::Brew, bestBrewable, 0);
 		}
 		
 		dbg.Print("Hunting brew %d (expect in %d moves).\n", bestBrewable->actionId, currentVertex.first);
@@ -1114,7 +1127,11 @@ namespace Logic
 		{
 			currentVertex = distanceList.at(currentVertex.second.parent);
 		}
-		return std::make_tuple(currentVertex.second.edgeType, currentVertex.second.performedAction);
+
+		afterGetAllBrewableTimer.time_passed();
+		return std::make_tuple(currentVertex.second.edgeType, currentVertex.second.performedAction,
+			currentVertex.second.castTimes
+		);
 	}
 
 	const Action* TryBlindCast(const ActionsContainer& casts, const IngredientsContainer& inventory)
@@ -1160,21 +1177,23 @@ namespace Logic
 
 		my::timer graphTimer("graph");
 		auto graph = Graph(casts, localInfo.inv);
-		GraphInfoDump(graph);
 		graphTimer.time_passed();
+
+		GraphInfoDump(graph);
 
 		my::timer brewHuntTimer("brew hunt");
 		auto brewHunt = TryHuntBrew(graph.distanceList, brews);
 		brewHuntTimer.time_passed();
+
 		if (brewHunt.has_value())
 		{
-			auto [edgeType, actionToPerform] = *brewHunt;
+			auto [edgeType, actionToPerform, castTimes] = *brewHunt;
 			switch (edgeType)
 			{
 			case Graph::EdgeType::Brew:
 				return std::string("BREW ") + std::to_string(actionToPerform->actionId);
 			case Graph::EdgeType::Cast:
-				return std::string("CAST ") + std::to_string(actionToPerform->actionId) + " 1";
+				return std::string("CAST ") + std::to_string(actionToPerform->actionId) + " " + std::to_string(castTimes);
 			case Graph::EdgeType::Rest:
 				return std::string("REST");
 			default:
@@ -1352,7 +1371,7 @@ void Preprocessing()
 	{
 		auto startTime = ChronoClock::now();
 		std::vector<int64_t> allTimeDeltas, allGraphTimeDeltas, allBrewHuntDeltas;
-		for (size_t i = 0; i < 200; i++)
+		for (size_t i = 0; i < 1000; i++)
 		{
 			gMoveBeginTimePoint = ChronoClock::now();
 
@@ -1381,22 +1400,22 @@ void Preprocessing()
 // 	 
 // 	 		inventory = { 1, 1, 1, 1 };
 
-			brews.emplace_back(62, IngredientsContainer{ 0, -2, 0, -3 }, 19, 0);
-			brews.emplace_back(66, IngredientsContainer{ -2, -1, 0, -1 }, 10, 1);
-			brews.emplace_back(73, IngredientsContainer{ -1, -1, -1, -1 }, 12, 2);
-			brews.emplace_back(65, IngredientsContainer{ 0, 0, 0, -5 }, 20, 3);
-			brews.emplace_back(67, IngredientsContainer{ 0, -2, -1, -1 }, 12, 4);
-			casts.emplace_back(78, IngredientsContainer{ 2, 0, 0, 0 }, 0, 1, 0, 0);
-			casts.emplace_back(79, IngredientsContainer{ -1, 1, 0, 0 }, 0, 1, 0, 1);
-			casts.emplace_back(80, IngredientsContainer{ 0, -1, 1, 0 }, 0, 1, 0, 2);
-			casts.emplace_back(81, IngredientsContainer{ 0, 0, -1, 1 }, 0, 1, 0, 3);
-			casts.emplace_back(86, IngredientsContainer{ -2, 0, 1, 0 }, 0, 0, 1, 4);
-			casts.emplace_back(88, IngredientsContainer{ 0, 2, -2, 1 }, 0, 1, 1, 5);
-			casts.emplace_back(90, IngredientsContainer{ 1, -3, 1, 1 }, 0, 1, 1, 6);
-			casts.emplace_back(92, IngredientsContainer{ 0, 3, 2, -2 }, 0, 0, 1, 7);
-			casts.emplace_back(94, IngredientsContainer{ 0, 2, 0, 0 }, 0, 1, 0, 8);
-			casts.emplace_back(95, IngredientsContainer{ -2, 0, -1, 2 }, 0, 0, 1, 9);
-			inventory = IngredientsContainer{ 0, 3, 0, 0 };
+			brews.emplace_back(48, IngredientsContainer{ 0, -2, -2, 0 }, 13, 0);
+			brews.emplace_back(53, IngredientsContainer{ 0, 0, -4, 0 }, 13, 1);
+			brews.emplace_back(43, IngredientsContainer{ -3, -2, 0, 0 }, 7, 2);
+			brews.emplace_back(77, IngredientsContainer{ -1, -1, -1, -3 }, 20, 3);
+			brews.emplace_back(60, IngredientsContainer{ 0, 0, -5, 0 }, 15, 4);
+			casts.emplace_back(82, IngredientsContainer{ 2, 0, 0, 0 }, 0, 0, 0, 0);
+			casts.emplace_back(83, IngredientsContainer{ -1, 1, 0, 0 }, 0, 0, 0, 1);
+			casts.emplace_back(84, IngredientsContainer{ 0, -1, 1, 0 }, 0, 1, 0, 2);
+			casts.emplace_back(85, IngredientsContainer{ 0, 0, -1, 1 }, 0, 1, 0, 3);
+			casts.emplace_back(87, IngredientsContainer{ -2, 0, 1, 0 }, 0, 0, 1, 4);
+			casts.emplace_back(89, IngredientsContainer{ 0, 0, 0, 1 }, 0, 0, 0, 5);
+			casts.emplace_back(91, IngredientsContainer{ 3, 0, 1, -1 }, 0, 1, 1, 6);
+			casts.emplace_back(93, IngredientsContainer{ 2, -2, 0, 1 }, 0, 0, 1, 7);
+			casts.emplace_back(95, IngredientsContainer{ -3, 0, 0, 1 }, 0, 0, 1, 8);
+			casts.emplace_back(97, IngredientsContainer{ 2, 2, 0, -1 }, 0, 0, 1, 9);
+			inventory = IngredientsContainer{ 1, 1, 1, 2 };
 
 			auto _1 = ChronoClock::now();
 			auto graph = Logic::Graph(casts, inventory);

@@ -35,6 +35,7 @@
 #define DEBUG_ACTIVE 1
 #define TIMERS_ACTIVE 1
 #define ASSERTS_ACTIVE 1
+#define ASSERTS_CAUSE_DEBUG_BREAK LOCAL_MACHINE and 1
 #define DEBUG_IN_RELEASE 1
 #define VECTOR_ASSERTS 1
 #define SHOW_TIME_ANYWAY 1
@@ -47,28 +48,40 @@ using ChronoClock = std::chrono::high_resolution_clock;
 constexpr bool kActionsDump = false;
 constexpr bool kTomeProfitDump = false;
 constexpr bool kEnemyCastsProfitDump = false;
-constexpr bool kBrewPathsDump = true;
+constexpr bool kPathTraceDump = true;
+constexpr bool kFinishVertexDump = true;
 constexpr bool kGraphInfoDump = true;
 #pragma endregion
+
+#pragma region GameConstants
+constexpr size_t kIngredients = 4;
+constexpr size_t kInventoryCapacity = 10;
+constexpr size_t kBrewsCount = 5;
+constexpr size_t kStartCastCount = 4;
+constexpr size_t kFullTomeSize = 42;
+constexpr size_t kTomeCapacity = 6;
+constexpr size_t kBrewsToWin = 6;
+#pragma endregion
+
+#pragma region Changable
 constexpr bool kShowHelloMessage = true;
 constexpr bool kSing = true;
 constexpr const char* kHelloMessage = "Кулити";
-constexpr size_t kIngredients = 4;
-constexpr size_t kInventoryCapacity = 10;
-constexpr size_t kClientsInHutCapacity = 5;
 constexpr int kStopLearningAfter = 10;
-// constexpr int kMaxBfsDepth = 999999;
-// constexpr int kGraphSizeCut = 10000;
-constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 25;
+constexpr size_t kMaxCastsCount = kStartCastCount + kFullTomeSize;
+constexpr size_t kAllActionsCapacity = kBrewsCount + 2 * kStartCastCount + 2 * kFullTomeSize;
+constexpr int kMaxEdgesFromVertex = kMaxCastsCount * (kInventoryCapacity / 2) + 1 + kBrewsCount + kTomeCapacity;
+constexpr size_t kMaxGraphVertexListSize = 400000;
+constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 30;
 constexpr int kGraphCheckTimeLimitPeriod = 50;
-constexpr int kMaxEdgesFromVertex = kStopLearningAfter * (kInventoryCapacity / 2) + 1;
+#pragma endregion
 #pragma endregion
 
 using IngredientsContainer = std::array<int, kIngredients>;
 
 #pragma region Globals
 std::mt19937 gRng(5);
-std::mt19937 gNotDetRng((uint32_t)ChronoClock::now().time_since_epoch().count()); // not deterministic random (seeded with time)
+std::mt19937 gNotDetRng((uint32_t)ChronoClock::now().time_since_epoch().count()); // Not deterministic random (seeded with time).
 float gIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
 ChronoClock::time_point gMoveBeginTimePoint;
 #pragma endregion
@@ -196,6 +209,10 @@ class Debugger : public IDebugger
 
 			Print(ss.str().c_str());
 			_caughtAssertions.insert(std::string("~") + ss.str());
+
+			#if ASSERTS_CAUSE_DEBUG_BREAK
+			__debugbreak();
+			#endif
 		}
 		#endif
 	}
@@ -451,15 +468,17 @@ namespace my
 	#pragma warning(push)
 	#pragma warning(disable : 6385)
 	#pragma warning(disable : 6386)
-	template<typename T, size_t capacity>
+	#pragma warning(disable : 26495)
+	template<typename T, size_t _capacity>
 	class vector
 	{
-		T data[capacity];
+		T data[_capacity];
 		size_t sz = 0;
 
 	public:
 		using iterator = T*;
 		using const_iterator = const T*;
+		using value_type = T;
 
 		vector()
 		{
@@ -469,7 +488,7 @@ namespace my
 		void emplace_back(Ts&&... args)
 		{
 			#if VECTOR_ASSERTS
-			ASSERT(sz < capacity);
+			ASSERT(sz < _capacity);
 			#endif
 			data[sz++] = T(std::forward<Ts>(args)...);
 		}
@@ -478,12 +497,30 @@ namespace my
 		void emplace(size_t pos, Ts&&... args)
 		{
 			#if VECTOR_ASSERTS
-			ASSERT(sz < capacity);
+			ASSERT(sz < _capacity);
 			#endif
 			for (size_t i = sz; i > pos; --i)
 				data[i] = data[i - 1];
 			data[pos] = T(std::forward<Ts>(args)...);
 			sz++;
+		}
+		
+		void resize(size_t newSize)
+		{
+			#if VECTOR_ASSERTS
+			ASSERT(newSize <= _capacity);
+			#endif
+			sz = newSize;
+		}
+
+		void push_back(T&& val)
+		{
+			emplace_back(std::move(val));
+		}
+
+		void push_back(const T& val)
+		{
+			emplace_back(val);
 		}
 
 		void clear()
@@ -494,6 +531,11 @@ namespace my
 		size_t size() const
 		{
 			return sz;
+		}
+
+		constexpr size_t capacity() const
+		{
+			return _capacity;
 		}
 
 		bool empty() const
@@ -586,6 +628,7 @@ namespace my
 
 	#pragma warning(push)
 	#pragma warning(disable : 26495)
+	template<class TimeUnit = std::chrono::milliseconds>
 	class timer
 	{
 	public:
@@ -595,11 +638,12 @@ namespace my
 		{
 		}
 
-		void time_passed()
+		void time_passed(const char* timeUnitAbbreviation = "ms")
 		{
-			fprintf(stderr, "Scope \"%s\" used %lld ms.\n",
+			fprintf(stderr, "Scope \"%s\" used %lld %s.\n",
 				_name,
-				std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - _startPoint).count()
+				std::chrono::duration_cast<TimeUnit>(ChronoClock::now() - _startPoint).count(),
+				timeUnitAbbreviation
 			);
 		}
 		#else
@@ -631,33 +675,31 @@ struct Action
 	int taxCount; // in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell
 	bool castable; // in the first league: always 0; later: 1 if this is a castable player spell
 	bool repeatable; // for the first two leagues: always 0; later: 1 if this is a repeatable player spell
-	int position = -1; // index in vector
 
-	// For debug.
-	#if LOCAL_MACHINE
+	#pragma warning(push)
+	#pragma warning(disable : 26495)
 	Action()
 	{
 	}
+	#pragma warning(pop)
 
-	Action(const IngredientsContainer& delta, bool castable, bool repeatable)
-		: delta(delta), castable(castable), repeatable(repeatable)
-	{
-	}
-
-	Action(const IngredientsContainer& delta, int price)
-		: delta(delta), price(price)
-	{
-	}
-
+	// For debug.
+	#if LOCAL_MACHINE and 1
 	// Brew.
-	Action(int actionId, const IngredientsContainer& delta, int price, int position)
-		: actionId(actionId), delta(delta), price(price), position(position)
+	Action(int actionId, const IngredientsContainer& delta, int price)
+		: actionId(actionId), delta(delta), price(price)
 	{
 	}
 
 	// Cast.
-	Action(int actionId, const IngredientsContainer& delta, int price, int castable, int repeatable, int position)
-		: actionId(actionId), delta(delta), price(price), castable(castable), repeatable(repeatable), position(position)
+	Action(int actionId, const IngredientsContainer& delta, int castable, int repeatable)
+		: actionId(actionId), delta(delta), castable(castable), repeatable(repeatable)
+	{
+	}
+
+	// Learn.
+	Action(int actionId, const IngredientsContainer& delta, int tomeIndex, int taxCount, int repeatable)
+		: actionId(actionId), delta(delta), tomeIndex(tomeIndex), taxCount(taxCount), repeatable(repeatable)
 	{
 	}
 	#endif
@@ -668,7 +710,10 @@ struct Action
 			price >> tomeIndex >> taxCount >> castable >> repeatable;
 	}
 };
-using ActionsContainer = std::vector<Action>;
+using AllActionsContainer = my::vector<Action, kAllActionsCapacity>;
+using BrewsContainer = my::vector<Action, kBrewsCount>;
+using CastsContainer = my::vector<Action, kMaxCastsCount>;
+using LearnsContainer = my::vector<Action, kTomeCapacity>;
 
 struct PlayerInfo
 {
@@ -707,6 +752,17 @@ private:
 	int _lastBalance = 0;
 	int _doneBrews = 0;
 };
+#pragma endregion
+
+#pragma region SomeDefinitions
+namespace Logic
+{
+	class Graph;
+}
+namespace DebuggerDump
+{
+	void GraphInfo(const Logic::Graph&);
+}
 #pragma endregion
 
 #pragma region Logic
@@ -760,47 +816,42 @@ namespace Logic
 		ASSERT(false, "there must be a missing ingredient");
 	}
 	#pragma warning(pop)
-
-	ActionsContainer GetDoableRightNow(const ActionsContainer& source, const IngredientsContainer& inv,
-		std::function<bool(const Action& obj, const IngredientsContainer& inv)> canDo)
-	{
-		auto doableRn = source;
-		doableRn.erase(std::remove_if(doableRn.begin(), doableRn.end(), [inv, canDo](const Action& obj) {
-			return !canDo(obj, inv);
-			}), doableRn.end());
-		return doableRn;
-	}
 	#pragma endregion
 
 	#pragma region Predicates
 	bool CanBrew(const Action& brew, const IngredientsContainer& inv)
 	{
 		bool ok = true;
-		for (size_t i = 0; i < kIngredients; i++)
+		for (size_t i = 0; i < inv.size(); i++)
 		{
 			ok &= brew.delta[i] + inv[i] >= 0;
 		}
 		return ok;
 	}
 
-	bool ShouldBeRepeatable(const IngredientsContainer& arr)
+	bool CanLearn(const Action& learn, const IngredientsContainer& inv)
 	{
-		return std::any_of(arr.begin(), arr.end(), [](const int x) { return x < 0; });
+		return inv[0] >= learn.tomeIndex;
 	}
 
-	bool CanCast(const Action& cast, const IngredientsContainer& inv)
+	bool ShouldBeRepeatable(const IngredientsContainer& arr)
 	{
-		bool ok = true;
-		for (size_t i = 0; i < kIngredients; i++)
+		bool ok = false;
+		for (const auto x : arr)
 		{
-			ok &= cast.delta[i] + inv[i] >= 0;
+			ok |= x < 0;
 		}
-		return ok && cast.castable && DeltaSum(inv) + DeltaSum(cast.delta) <= kInventoryCapacity;
+		return ok;
 	}
 
 	bool CorrectInventory(const IngredientsContainer& inv)
 	{
-		return DeltaSum(inv) <= 10 && std::all_of(inv.begin(), inv.end(), [](const int x) { return x >= 0; });
+		bool ok = true;
+		for (const auto x : inv)
+		{
+			ok &= x >= 0;
+		}
+		return ok && DeltaSum(inv) <= 10;
 	}
 	#pragma endregion
 
@@ -808,24 +859,23 @@ namespace Logic
 	class Graph
 	{
 	public:
-		using CastableMaskType = uint64_t;
-		using VertexIndexType = uint64_t;
-
 		enum class EdgeType
 		{
 			Root = 0,
 			Rest,
 			Cast,
 			Brew,
-			Learn,
+			Learn
 		};
+		
+		struct VertexInfo;
 
 		struct Edge
 		{
 			EdgeType edgeType;
-			VertexIndexType child;
+			VertexInfo* vertex;
 			const Action* performedAction;
-			int castTimes;
+			int additionalData; // Cast times.
 
 			#pragma warning(push)
 			#pragma warning(disable : 26495)
@@ -834,80 +884,212 @@ namespace Logic
 			}
 			#pragma warning(pop)
 
-			Edge(EdgeType edgeType, VertexIndexType child, const Action* performedAction = nullptr, int castTimes = 0)
-				: edgeType(edgeType), child(child), performedAction(performedAction), castTimes(castTimes)
+			Edge(EdgeType edgeType, VertexInfo* vertex = nullptr, const Action* performedAction = nullptr, int additionalData = 0)
+				: edgeType(edgeType), vertex(vertex), performedAction(performedAction), additionalData(additionalData)
 			{
 			}
+
+			Edge(const Edge& other, VertexInfo* newVertex)
+				: Edge(other.edgeType, newVertex, other.performedAction, other.additionalData)
+			{
+			}
+
+			#pragma warning(push)
+			#pragma warning(disable : 4715)
+			std::string ToString() const
+			{
+				switch (edgeType)
+				{
+				case EdgeType::Rest:
+					return "REST";
+				case EdgeType::Cast:
+					return std::string("CAST ") + std::to_string(performedAction->actionId) + " " + std::to_string(additionalData);
+				case EdgeType::Brew:
+					return std::string("BREW ") + std::to_string(performedAction->actionId);
+				case EdgeType::Learn:
+					return std::string("LEARN ") + std::to_string(performedAction->actionId);
+				default:
+					ASSERT(false, "Unknown edge.");
+				}
+			}
+			#pragma warning(pop)
 		};
 
-		struct ReverseEdge
+		struct VertexInfo
 		{
-			EdgeType edgeType;
-			VertexIndexType parent;
-			const Action* performedAction;
-			int castTimes;
+			using CastableBitset = std::bitset<kMaxCastsCount>;
+			using LearnedBitset = std::bitset<kTomeCapacity>;
+			using BrewedBitset = std::bitset<kBrewsCount>;
+
+			Edge reverseEdge;
+			IngredientsContainer inventory;
+			my::vector<const Action*, kMaxCastsCount> casts;
+			std::array<int, kTomeCapacity> taxes;
+			CastableBitset castable;
+
+			bool isLeaf;
+
+			int depth;
+			LearnedBitset learned;
+			BrewedBitset brewed;
+			int brewCount;
+			int minBrewDepth;
+			int brewsPrice;
 
 			#pragma warning(push)
 			#pragma warning(disable : 26495)
-			ReverseEdge()
+			VertexInfo()
 			{
 			}
 			#pragma warning(pop)
 
-			ReverseEdge(EdgeType edgeType, VertexIndexType parent, const Action* performedAction = nullptr, int castTimes = 0)
-				: edgeType(edgeType), parent(parent), performedAction(performedAction), castTimes(castTimes)
+			VertexInfo(const Edge& reverseEdge, const IngredientsContainer& inventory,
+				const decltype(casts)& casts, const decltype(taxes)& taxes, CastableBitset castable,
+				int depth = 0, LearnedBitset learned = 0, BrewedBitset brewed = 0,
+				int brewCount = 0, int minBrewDepth = 0, int brewsPrice = 0
+			)
+				: reverseEdge(reverseEdge), inventory(inventory), casts(casts), taxes(taxes), castable(castable),
+				isLeaf(true),
+				depth(depth), learned(learned), brewed(brewed),
+				brewCount(brewCount), minBrewDepth(minBrewDepth), brewsPrice(brewsPrice)
 			{
 			}
 		};
 
-		Graph(const ActionsContainer& casts, const IngredientsContainer& inventory)
-			: _castsCount(casts.size())
+		#pragma warning(push)
+		#pragma warning(disable : 26495)
+		Graph()
 		{
-			auto startVertex = ToVertexIndex(inventory, CastableMaskFromCasts(casts));
-			distanceList[startVertex] = std::make_pair(0, ReverseEdge(EdgeType::Root, startVertex));
-
-			BFS(startVertex, casts);
 		}
+		#pragma warning(pop)
 
-		static inline IngredientsContainer InventoryFromVertexIndex(VertexIndexType index)
+		void Initialize(const CastsContainer& casts, const BrewsContainer& brews, const LearnsContainer& learns,
+			const IngredientsContainer& inventory)
 		{
-			return {
-				index >> (0 * 4) & ((1 << 4) - 1),
-				index >> (1 * 4) & ((1 << 4) - 1),
-				index >> (2 * 4) & ((1 << 4) - 1),
-				index >> (3 * 4) & ((1 << 4) - 1),
-			};
+			_casts = &casts;
+			_brews = &brews;
+			_learns = &learns;
+			_inventory = &inventory;
+			vertexList.clear();
+
+			decltype(VertexInfo::taxes) taxes{};
+			for (size_t i = 0; i < (*_learns).size(); i++)
+			{
+				taxes[i] = (*_learns)[i].taxCount;
+			}
+
+			decltype(VertexInfo::casts) castsPtrs;
+			VertexInfo::CastableBitset castable;
+			for (size_t i = 0; i < casts.size(); i++)
+			{
+				castable[i] = casts[i].castable;
+				castsPtrs.emplace_back(&casts[i]);
+			}
+
+			vertexList.emplace_back(Edge(EdgeType::Root), inventory, castsPtrs, taxes, castable);
+
+			BFS();
 		}
 
 	public:
-		std::unordered_map<VertexIndexType, std::pair<int, ReverseEdge>> distanceList;
+		my::vector<VertexInfo, kMaxGraphVertexListSize> vertexList;
 
 	private:
-		my::vector<Edge, kMaxEdgesFromVertex> GetEdgesOfVertex(VertexIndexType vertex, const ActionsContainer& casts)
+		auto GetRestEdgeOfVertex(VertexInfo* vertex)
 		{
-			auto inventory = InventoryFromVertexIndex(vertex);
-			auto castableMask = CastableMaskFromVertexIndex(vertex);
+			Edge reverseEdge(EdgeType::Rest, vertex);
+			vertexList.emplace_back(reverseEdge, vertex->inventory, vertex->casts, vertex->taxes, (1ll << vertex->casts.size()) - 1,
+				vertex->depth + 1, vertex->learned, vertex->brewed, vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
+			);
+			return Edge(reverseEdge, &vertexList.back());
+		}
 
-			my::vector<Edge, kMaxEdgesFromVertex> edges;
+		auto GetBrewEdgesOfVertex(VertexInfo* vertex)
+		{
+			my::vector<Edge, kBrewsCount> edges;
 
-			auto fullCastableMask = ((CastableMaskType)1 << _castsCount) - 1;
-			edges.emplace_back(EdgeType::Rest, ToVertexIndex(inventory, fullCastableMask));
-
-			for (size_t i = 0; i < _castsCount; i++)
+			for (size_t i = 0; i < kBrewsCount; i++)
 			{
-				if (castableMask & (CastableMaskType)1 << i)
+				if (!vertex->brewed[i] && CanBrew((*_brews)[i], vertex->inventory))
 				{
-					auto newInventory = inventory;
-					for (int castTimes = 1; casts[i].repeatable || castTimes == 1; castTimes++)
+					auto newInventory = vertex->inventory;
+					ApplyDelta(newInventory, (*_brews)[i].delta);
+
+					Edge reverseEdge(EdgeType::Brew, vertex, &(*_brews)[i]);
+					vertexList.emplace_back(reverseEdge, newInventory, vertex->casts, vertex->taxes, vertex->castable,
+						vertex->depth + 1, vertex->learned, vertex->brewed | VertexInfo::BrewedBitset(1ll << i),
+						vertex->brewCount + 1, vertex->brewCount ? vertex->minBrewDepth : vertex->depth,
+						vertex->brewsPrice + (*_brews)[i].price
+					);
+					edges.emplace_back(reverseEdge, &vertexList.back());
+				}
+			}
+
+			return edges;
+		}
+
+		auto GetLearnEdgesOfVertex(VertexInfo* vertex)
+		{
+			my::vector<Edge, kTomeCapacity> edges;
+
+			for (size_t i = 0; i < _learns->size(); i++)
+			{
+				if (!vertex->learned[i] && CanLearn((*_learns)[i], vertex->inventory))
+				{
+					auto newInventory = vertex->inventory;
+					newInventory[0] += vertex->taxes[i] - (*_learns)[i].tomeIndex;
+					newInventory[0] -= std::max(0, DeltaSum(newInventory) - (int)kInventoryCapacity);
+
+					auto newTaxes = vertex->taxes;
+					for (size_t j = 0; j < i; j++)
 					{
-						ApplyDelta(newInventory, casts[i].delta);
+						if (!vertex->learned[j])
+						{
+							newTaxes[j]++;
+						}
+					}
+
+					auto newCasts = vertex->casts;
+					newCasts.emplace_back(&(*_learns)[i]);
+
+					Edge reverseEdge(EdgeType::Learn, vertex, &(*_learns)[i]);
+					vertexList.emplace_back(reverseEdge, newInventory, newCasts, newTaxes,
+						vertex->castable | VertexInfo::CastableBitset(1ll << vertex->casts.size()),
+						vertex->depth + 1, vertex->learned | VertexInfo::LearnedBitset(1ll << i),
+						vertex->brewed, vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
+					);
+					edges.emplace_back(reverseEdge, &vertexList.back());
+				}
+			}
+
+			return edges;
+		}
+
+		auto GetCastEdgesOfVertex(VertexInfo* vertex)
+		{
+			my::vector<Edge, kMaxCastsCount> edges;
+
+			for (size_t i = 0; i < vertex->casts.size(); i++)
+			{
+				if (vertex->castable[i])
+				{
+					auto newInventory = vertex->inventory;
+					auto newCastable = vertex->castable ^ VertexInfo::CastableBitset(1ll << i);
+
+					for (int castTimes = 1; vertex->casts[i]->repeatable || castTimes == 1; castTimes++)
+					{
+						ApplyDelta(newInventory, vertex->casts[i]->delta);
 						if (!CorrectInventory(newInventory))
 						{
 							break;
 						}
 
-						edges.emplace_back(EdgeType::Cast, ToVertexIndex(newInventory, castableMask ^ (CastableMaskType)1 << i),
-							&casts[i], castTimes);
+						Edge reverseEdge(EdgeType::Cast, vertex, vertex->casts[i], castTimes);
+						vertexList.emplace_back(reverseEdge, newInventory, vertex->casts, vertex->taxes, newCastable,
+							vertex->depth + 1, vertex->learned, vertex->brewed,
+							vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
+						);
+						edges.emplace_back(reverseEdge, &vertexList.back());
 					}
 				}
 			}
@@ -915,22 +1097,42 @@ namespace Logic
 			return edges;
 		}
 
-		void BFS(VertexIndexType startVertex, const ActionsContainer& casts)
+		auto GetEdgesOfVertex(VertexInfo* vertex)
 		{
+			my::vector<Edge, kMaxEdgesFromVertex> edges;
+
+			edges.emplace_back(GetRestEdgeOfVertex(vertex));
+			
+			for (const auto& edge : GetBrewEdgesOfVertex(vertex))
+			{
+				edges.emplace_back(edge);
+			}
+
+			for (const auto& edge : GetLearnEdgesOfVertex(vertex))
+			{
+				edges.emplace_back(edge);
+			}
+
+			for (const auto& edge : GetCastEdgesOfVertex(vertex))
+			{
+				edges.emplace_back(edge);
+			}
+			
+		 	return edges;
+		}
+
+		void BFS()
+		{
+			static std::queue<VertexInfo*> q;
+			while (!q.empty()) q.pop();
+			q.emplace(&vertexList.front());
+
 			int timerHelperLastCount = 0;
 			int timerHelperCounter = 0;
 
-			#if 1
-			static std::queue<std::pair<VertexIndexType, int>> q;
-			while (!q.empty()) q.pop();
-			#else
-			std::queue<std::pair<VertexIndexType, int>> q;
-			#endif
-
-			q.emplace(startVertex, distanceList[startVertex].first);
 			while (!q.empty())
 			{
-				auto [vertex, distance] = q.front();
+				auto vertex = q.front();
 				q.pop();
 
 				if (++timerHelperCounter - timerHelperLastCount > kGraphCheckTimeLimitPeriod)
@@ -942,222 +1144,129 @@ namespace Logic
 					}
 				}
 
-				for (auto [edgeType, newVertex, performedAction, castTimes] : GetEdgesOfVertex(vertex, casts))
+				vertex->isLeaf = false;
+
+				for (const auto& edge : GetEdgesOfVertex(vertex))
 				{
-					auto it = distanceList.find(newVertex);
-					if (it == distanceList.end() || distance + 1 < it->second.first)
-					{
-						distanceList[newVertex] = std::make_pair(distance + 1, ReverseEdge(edgeType, vertex, performedAction, castTimes));
-						q.emplace(newVertex, distance + 1);
-					}
+					q.emplace(edge.vertex);
 				}
 			}
-		}
-
-		static inline VertexIndexType ToVertexIndex(const IngredientsContainer& inv, CastableMaskType castable)
-		{
-			return
-				inv[0] << (0 * 4) |
-				inv[1] << (1 * 4) |
-				inv[2] << (2 * 4) |
-				inv[3] << (3 * 4) |
-				castable << (4 * 4);
-		}
-
-		static inline CastableMaskType CastableMaskFromVertexIndex(VertexIndexType index)
-		{
-			return index >> (4 * 4);
-		}
-
-		static CastableMaskType CastableMaskFromCasts(const ActionsContainer& casts)
-		{
-			CastableMaskType mask{};
-			for (size_t i = 0; i < casts.size(); i++)
-			{
-				mask |= (CastableMaskType)casts[i].castable << i;
-			}
-			return mask;
 		}
 
 	private:
-		size_t _castsCount;
+		const CastsContainer* _casts;
+		const BrewsContainer* _brews;
+		const LearnsContainer* _learns;
+		const IngredientsContainer* _inventory;
 	};
+	Graph gGraph;
 	#pragma endregion
 
 	#pragma region Main
-	const Action* BestBrewableFromPath(const decltype(Graph::distanceList)::value_type& path, const ActionsContainer& brews)
+	float Estimate(const Graph::VertexInfo* vertex)
 	{
-		auto inventory = Graph::InventoryFromVertexIndex(path.first);
-		const Action* result = nullptr;
+		return +vertex->brewsPrice * 1.0f
+			- vertex->minBrewDepth * 2.0f
+			+ (float)vertex->castable.count() / vertex->casts.size() * 1.0f
+			+ vertex->casts.size() * 0.5f
+			+ IngredientsWorth(vertex->inventory) * 0.03f
+			- vertex->depth * 1.2f
+			;
+	}
 
-		for (const auto& brew : brews)
+	bool PathsComparator(const Graph::VertexInfo* lhs, const Graph::VertexInfo* rhs)
+	{
+		return Estimate(lhs) < Estimate(rhs);
+		if (lhs->brewCount != rhs->brewCount)
 		{
-			if (CanBrew(brew, inventory) && (
-				result == nullptr ||
-				result->price < brew.price ||
-				result->price == brew.price && IngredientsWorth(result->delta) > IngredientsWorth(brew.delta)
-			))
-			{
-				result = &brew;
-			}
+			return lhs->brewCount < rhs->brewCount;
 		}
 
+		if (lhs->brewCount != 0)
+		{
+			constexpr static auto estimate = [](const Graph::VertexInfo* vertex) -> float {
+				return vertex->brewsPrice * 2.0f - vertex->minBrewDepth * 3.0f +
+					(float)vertex->castable.count() / vertex->casts.size() * 1.0f +
+					vertex->casts.size() * 1.0f +
+					IngredientsWorth(vertex->inventory) * 0.02f -
+					vertex->depth * 1.1f;
+			};
+			return estimate(lhs) < estimate(rhs);
+		}
+		else
+		{
+			constexpr static auto estimate = [](const Graph::VertexInfo* vertex) -> float {
+				return IngredientsWorth(vertex->inventory) * 0.05f +
+					(float)vertex->castable.count() / vertex->casts.size() * 1.0f +
+					vertex->casts.size() * 1.0f -
+					vertex->depth * 1.1f;
+			};
+			return estimate(lhs) < estimate(rhs);
+		}
+	}
+
+	auto TracePathToVertex(const Graph::VertexInfo* vertex)
+	{
+		std::vector<Graph::Edge> result;
+		result.reserve(15);
+		while (vertex->reverseEdge.edgeType != Graph::EdgeType::Root)
+		{
+			result.push_back(vertex->reverseEdge);
+			vertex = vertex->reverseEdge.vertex;
+		}
+		std::reverse(result.begin(), result.end());
 		return result;
 	}
 
-	inline float CalculateBrewPathWorth(int price, int depth)
+	void FinishVertexDump(const Graph::VertexInfo* vertex)
 	{
-		return price - depth * 1.75f;
-	}
-
-	bool ComparePathsToBrew(std::pair<const decltype(Graph::distanceList)::value_type&, const Action*> lhs,
-							std::pair<const decltype(Graph::distanceList)::value_type&, const Action*> rhs)
-	{
-		auto leftPathWorth = CalculateBrewPathWorth(lhs.second->price, lhs.first.second.first);
-		auto rightPathWorth = CalculateBrewPathWorth(rhs.second->price, rhs.first.second.first);
-
-		return
-			leftPathWorth < rightPathWorth ||
-			leftPathWorth == rightPathWorth && (
-				lhs.second->price < rhs.second->price ||
-				lhs.second->price == rhs.second->price && (
-					IngredientsWorth(lhs.second->delta) > IngredientsWorth(rhs.second->delta)
-				)
-			);
-	}
-
-	const auto& GetAllBrewable(const decltype(Graph::distanceList)& distanceList, const ActionsContainer& brews)
-	{
-		static std::vector<std::pair<const std::remove_reference<decltype(distanceList)>::type::value_type&, const Action*>> allBrewable;
-		allBrewable.clear();
-
-		for (const auto& vertex : distanceList)
+		if constexpr (kFinishVertexDump && DEBUG)
 		{
-			auto bestBrewable = BestBrewableFromPath(vertex, brews);
-			if (bestBrewable != nullptr)
+			dbg.Print("Desired vertex: estimate = %f, brewCount = %d, brewsPrice = %d, minBrewDepth = %d, castable = %d.\n",
+				Estimate(vertex), vertex->brewCount, vertex->brewsPrice, vertex->minBrewDepth, vertex->castable.count());
+		}
+	}
+
+	void PathTraceDump(const std::vector<Graph::Edge>& trace)
+	{
+		if constexpr (kPathTraceDump && DEBUG)
+		{
+			dbg.Separator();
+			dbg.Print("Path trace:\n");
+			
+			for (const auto& edge : trace)
 			{
-				allBrewable.emplace_back(vertex, bestBrewable);
+				dbg.Print(edge.ToString().c_str());
+				dbg.NewLine();
+			}
+
+			dbg.Separator();
+		}
+	}
+
+	std::string ChooseBestMove()
+	{
+		static my::vector<const Graph::VertexInfo*, kMaxGraphVertexListSize> vertexBuf;
+		vertexBuf.clear();
+		for (const auto& vertex : gGraph.vertexList)
+		{
+			if (vertex.depth)
+			{
+				vertexBuf.emplace_back(&vertex);
 			}
 		}
 
-		return allBrewable;
+		auto bestVertex = *std::max_element(vertexBuf.begin(), vertexBuf.end(), PathsComparator);
+		auto trace = TracePathToVertex(bestVertex);
+
+		FinishVertexDump(bestVertex);
+		PathTraceDump(trace);
+
+		return trace.front().ToString();
 	}
 
-	void GraphInfoDump(const Graph& graph)
-	{
-		if constexpr (kGraphInfoDump && DEBUG)
-		{
-			dbg.Print("Graph size: %d.\n", graph.distanceList.size());
-
-			int maxDepth = 0;
-			for (const auto& vertex : graph.distanceList)
-			{
-				maxDepth = std::max(maxDepth, vertex.second.first);
-			}
-			dbg.Print("Max depth: %d.\n", maxDepth);
-		}
-	}
-
-	void BrewPathsDump(const std::vector<std::pair<const decltype(Graph::distanceList)::value_type&, const Action*>>& allBrewable)
-	{
-		if constexpr (kBrewPathsDump && DEBUG)
-		{
-			std::array<std::remove_const<std::remove_reference<decltype(allBrewable)>::type>::type, kClientsInHutCapacity> brewLists;
-			for (const auto& brew : allBrewable)
-			{
-				brewLists[brew.second->position].push_back(brew);
-			}
-			for (const auto& brewList : brewLists)
-			{
-				if (brewList.empty())
-				{
-					dbg.Print("No paths to this brew.\n");
-					continue;
-				}
-
-				const auto& bestBrew = *max_element(brewList.begin(), brewList.end(), [](const auto& lhs, const auto& rhs) {
-					return ComparePathsToBrew(lhs, rhs);
-				});
-
-				dbg.Print("Best path to brew %d: price = %d, moves = %d, worth = %f.\n",
-					bestBrew.second->actionId,
-					bestBrew.second->price,
-					bestBrew.first.second.first,
-					CalculateBrewPathWorth(bestBrew.second->price, bestBrew.first.second.first)
-				);
-			}
-		}
-	}
-
-	std::optional<std::tuple<Graph::EdgeType, const Action*, int>> TryHuntBrew(const decltype(Graph::distanceList)& distanceList,
-		const ActionsContainer& brews)
-	{
-		ASSERT(!distanceList.empty());
-
-		my::timer getAllBrewableTimer("GetAllBrewable");
-		const auto& allBrewable = GetAllBrewable(distanceList, brews);
-		getAllBrewableTimer.time_passed();
-
-		my::timer afterGetAllBrewableTimer("after GetAllBrewable");
-		if (allBrewable.empty())
-		{
-			dbg.Print("No possible brews.\n");
-			return {};
-		}
-		dbg.Print("Possible brew paths: %d.\n", allBrewable.size());
-
-		BrewPathsDump(allBrewable);
-
-		const auto& bestHunt = *max_element(allBrewable.begin(), allBrewable.end(), [](const auto& lhs, const auto& rhs) {
-			return ComparePathsToBrew(lhs, rhs);
-		});
-
-		const auto bestBrewable = bestHunt.second;
-		auto currentVertex = bestHunt.first.second;
-
-		// Can brew right now.
-		if (currentVertex.second.edgeType == Graph::EdgeType::Root)
-		{
-			dbg.Print("Can brew %d right now.\n", bestBrewable->actionId);
-			return std::make_tuple(Graph::EdgeType::Brew, bestBrewable, 0);
-		}
-		
-		dbg.Print("Hunting brew %d (expect in %d moves).\n", bestBrewable->actionId, currentVertex.first);
-		while (distanceList.at(currentVertex.second.parent).second.edgeType != Graph::EdgeType::Root)
-		{
-			currentVertex = distanceList.at(currentVertex.second.parent);
-		}
-
-		afterGetAllBrewableTimer.time_passed();
-		return std::make_tuple(currentVertex.second.edgeType, currentVertex.second.performedAction,
-			currentVertex.second.castTimes
-		);
-	}
-
-	const Action* TryBlindCast(const ActionsContainer& casts, const IngredientsContainer& inventory)
-	{
-		std::vector<const Action*> castableRn;
-		castableRn.reserve(casts.capacity());
-		std::transform(casts.begin(), casts.end(), std::back_inserter(castableRn), [](const Action& cast) { return &cast; });
-
-		castableRn.erase(std::remove_if(castableRn.begin(), castableRn.end(), [&inventory](const Action* cast) {
-			return !CanCast(*cast, inventory);
-		}), castableRn.end());
-
-		if (castableRn.empty())
-		{
-			dbg.Print("Unable to do blind cast.\n");
-			return nullptr;
-		}
-
-		return *max_element(castableRn.begin(), castableRn.end(), [](const Action* lhs, const Action* rhs) {
-			return IngredientsWorth(lhs->delta) < IngredientsWorth(rhs->delta);
-		});
-	}
-
-	std::string DoMain(int moveNumber, PlayerInfo& localInfo, PlayerInfo& enemyInfo, const ActionsContainer& brews,
-		const ActionsContainer& casts, const ActionsContainer& opponent_casts, const ActionsContainer& learns,
-		int& debugIdleCounter, int& debugBlindCastCounter)
+	std::string DoMain(int moveNumber, PlayerInfo& localInfo, PlayerInfo& enemyInfo, const BrewsContainer& brews,
+		const CastsContainer& casts, const CastsContainer& opponent_casts, const LearnsContainer& learns)
 	{
 		static auto enemyTracker = EnemyTracker();
 		static auto myselfTracker = EnemyTracker();
@@ -1170,48 +1279,16 @@ namespace Logic
 			dbg.Print("I brewed a potion.\n");
 		}
 
-		if (!learns.empty() && casts.size() < kStopLearningAfter)
-		{
-			return std::string("LEARN ") + std::to_string(learns.front().actionId);
-		}
+		my::timer graphInitializeTimer("graph initialize");
+		gGraph.Initialize(casts, brews, learns, localInfo.inv);
+		graphInitializeTimer.time_passed();
+		DebuggerDump::GraphInfo(gGraph);
 
-		my::timer graphTimer("graph");
-		auto graph = Graph(casts, localInfo.inv);
-		graphTimer.time_passed();
+		my::timer chooseBestMoveTimer("choose best move");
+		auto bestMove = ChooseBestMove();
+		chooseBestMoveTimer.time_passed();
 
-		GraphInfoDump(graph);
-
-		my::timer brewHuntTimer("brew hunt");
-		auto brewHunt = TryHuntBrew(graph.distanceList, brews);
-		brewHuntTimer.time_passed();
-
-		if (brewHunt.has_value())
-		{
-			auto [edgeType, actionToPerform, castTimes] = *brewHunt;
-			switch (edgeType)
-			{
-			case Graph::EdgeType::Brew:
-				return std::string("BREW ") + std::to_string(actionToPerform->actionId);
-			case Graph::EdgeType::Cast:
-				return std::string("CAST ") + std::to_string(actionToPerform->actionId) + " " + std::to_string(castTimes);
-			case Graph::EdgeType::Rest:
-				return std::string("REST");
-			default:
-				ASSERT(false, "Unknown edge in brew hunt.\n");
-				break;
-			}
-		}
-
-		if (auto blindCast = TryBlindCast(casts, localInfo.inv))
-		{
-			debugBlindCastCounter++;
-			dbg.Print("Doing blind cast.\n");
-			return std::string("CAST ") + std::to_string(blindCast->actionId) + " 1";
-		}
-
-		debugIdleCounter++;
-		dbg.Print("Idle.\n");
-		return "REST";
+		return bestMove;
 	}
 	#pragma endregion
 }
@@ -1237,7 +1314,7 @@ namespace DebuggerDump
 		return ss.str();
 	}
 
-	void Actions(const ActionsContainer& brews, const ActionsContainer& casts, const IngredientsContainer& inventory)
+	void Actions(const BrewsContainer& brews, const CastsContainer& casts, const LearnsContainer& learns, const IngredientsContainer& inventory)
 	{
 		if constexpr (kActionsDump && DEBUG)
 		{
@@ -1245,11 +1322,10 @@ namespace DebuggerDump
 
 			for (const auto& brew : brews)
 			{
-				dbg.Print("brews.emplace_back(%d, %s, %d, %d);\n",
+				dbg.Print("brews.emplace_back(%d, %s, %d);\n",
 					brew.actionId,
 					IngredientsContainerToString(brew.delta).c_str(),
-					brew.price,
-					brew.position
+					brew.price
 				);
 			}
 
@@ -1257,13 +1333,24 @@ namespace DebuggerDump
 
 			for (const auto& cast : casts)
 			{
-				dbg.Print("casts.emplace_back(%d, %s, %d, %d, %d, %d);\n",
+				dbg.Print("casts.emplace_back(%d, %s, %d, %d);\n",
 					cast.actionId,
 					IngredientsContainerToString(cast.delta).c_str(),
-					cast.price,
 					cast.castable,
-					cast.repeatable,
-					cast.position
+					cast.repeatable
+				);
+			}
+
+			dbg.NewLine();
+
+			for (const auto& learn : learns)
+			{
+				dbg.Print("learns.emplace_back(%d, %s, %d, %d, %d);\n",
+					learn.actionId,
+					IngredientsContainerToString(learn.delta).c_str(),
+					learn.tomeIndex,
+					learn.taxCount,
+					learn.repeatable
 				);
 			}
 
@@ -1275,6 +1362,7 @@ namespace DebuggerDump
 		}
 	}
 
+	template<typename ActionsContainer>
 	void Profit(bool assertion, const ActionsContainer& actions, const char* name)
 	{
 		#if DEBUG
@@ -1287,48 +1375,53 @@ namespace DebuggerDump
 		}
 		#endif
 	}
+
+	void GraphInfo(const Logic::Graph& graph)
+	{
+		#if DEBUG
+		if (kGraphInfoDump)
+		{
+			dbg.Print("Graph size = %llu, max depth = %d.\n", graph.vertexList.size(), graph.vertexList.back().depth);
+		}
+		#endif
+	}
 }
 #pragma endregion
 
 #pragma region Reading
 namespace Reading
 {
-	void ClassifyAction(const ActionsContainer& source, ActionsContainer& destination, const char* targetName)
+	template<typename DestinationContainer>
+	void ClassifyAction(const AllActionsContainer& source, DestinationContainer& destination, const char* targetName)
 	{
 		std::copy_if(source.begin(), source.end(), std::back_inserter(destination), [targetName](const Action& obj) {
 			return obj.actionType == targetName;
 		});
-		for (size_t i = 0; i < destination.size(); i++)
-		{
-			destination[i].position = i;
-		}
 	}
 
-	void ReadActions(ActionsContainer& brews, ActionsContainer& casts, ActionsContainer& opponent_casts, ActionsContainer& learns)
+	void ReadActions(BrewsContainer& brews, CastsContainer& casts, CastsContainer& opponent_casts, LearnsContainer& learns)
 	{
 		int actionCount;
 		std::cin >> actionCount;
-		auto actions = ActionsContainer();
-		actions.reserve(actionCount);
-		std::generate_n(std::back_inserter(actions), actionCount, []() { return Action(std::cin); });
+		AllActionsContainer allActions;
+		std::generate_n(std::back_inserter(allActions), actionCount, []() { return Action(std::cin); });
 
-		ClassifyAction(actions, brews, "BREW");
-		ClassifyAction(actions, casts, "CAST");
-		ClassifyAction(actions, opponent_casts, "OPPONENT_CAST");
-		ClassifyAction(actions, learns, "LEARN");
+		ClassifyAction(allActions, brews, "BREW");
+		ClassifyAction(allActions, casts, "CAST");
+		ClassifyAction(allActions, opponent_casts, "OPPONENT_CAST");
+		ClassifyAction(allActions, learns, "LEARN");
 
-		ASSERT(actions.size() == brews.size() + casts.size() + opponent_casts.size() + learns.size(), "some action wasn't recognized");
-		ASSERT(brews.size() == 5);
+		ASSERT(allActions.size() == brews.size() + casts.size() + opponent_casts.size() + learns.size(), "some action wasn't recognized");
 	}
 
-	void Do(ActionsContainer& brews, ActionsContainer& casts, ActionsContainer& opponent_casts, ActionsContainer& learns,
+	void Do(BrewsContainer& brews, CastsContainer& casts, CastsContainer& opponent_casts, LearnsContainer& learns,
 		PlayerInfo& localInfo, PlayerInfo& enemyInfo)
 	{
 		ReadActions(brews, casts, opponent_casts, learns);
 		localInfo = PlayerInfo(std::cin);
 		enemyInfo = PlayerInfo(std::cin);
 
-		DebuggerDump::Actions(brews, casts, localInfo.inv);
+		DebuggerDump::Actions(brews, casts, learns, localInfo.inv);
 		DebuggerDump::Profit(kTomeProfitDump, learns, "tome");
 		DebuggerDump::Profit(kEnemyCastsProfitDump, opponent_casts, "enemy cast");
 	}
@@ -1370,20 +1463,25 @@ void Preprocessing()
 	#if LOCAL_MACHINE and 1
 	{
 		auto startTime = ChronoClock::now();
+		constexpr size_t iterationsCount = 20;
 		std::vector<int64_t> allTimeDeltas, allGraphTimeDeltas, allBrewHuntDeltas;
-		for (size_t i = 0; i < 1000; i++)
+		size_t graphSizeSum = 0;
+		size_t graphDepthSum = 0;
+
+		for (size_t i = 0; i < iterationsCount; i++)
 		{
 			gMoveBeginTimePoint = ChronoClock::now();
 
-			auto brews = ActionsContainer();
-			auto casts = ActionsContainer();
-			auto inventory = IngredientsContainer();
+			BrewsContainer brews;
+			CastsContainer casts;
+			LearnsContainer learns;
+			IngredientsContainer inventory;
 
 // 	 		std::transform(Deck::orders.begin(), Deck::orders.end(), std::back_inserter(brews), [](const auto& obj) {
 // 	 			return Action(obj.first, obj.second);
 // 	 		});
 // 	 		std::shuffle(brews.begin(), brews.end(), gRng);
-// 	 		brews.resize(kClientsInHutCapacity);
+// 	 		brews.resize(kBrewsCount);
 // 	 		std::for_each(brews.begin(), brews.end(), [i=0](Action& brew) mutable {
 // 	 			brew.position = brew.actionId = i++;
 // 	 		});
@@ -1400,46 +1498,35 @@ void Preprocessing()
 // 	 
 // 	 		inventory = { 1, 1, 1, 1 };
 
-			brews.emplace_back(48, IngredientsContainer{ 0, -2, -2, 0 }, 13, 0);
-			brews.emplace_back(53, IngredientsContainer{ 0, 0, -4, 0 }, 13, 1);
-			brews.emplace_back(43, IngredientsContainer{ -3, -2, 0, 0 }, 7, 2);
-			brews.emplace_back(77, IngredientsContainer{ -1, -1, -1, -3 }, 20, 3);
-			brews.emplace_back(60, IngredientsContainer{ 0, 0, -5, 0 }, 15, 4);
-			casts.emplace_back(82, IngredientsContainer{ 2, 0, 0, 0 }, 0, 0, 0, 0);
-			casts.emplace_back(83, IngredientsContainer{ -1, 1, 0, 0 }, 0, 0, 0, 1);
-			casts.emplace_back(84, IngredientsContainer{ 0, -1, 1, 0 }, 0, 1, 0, 2);
-			casts.emplace_back(85, IngredientsContainer{ 0, 0, -1, 1 }, 0, 1, 0, 3);
-			casts.emplace_back(87, IngredientsContainer{ -2, 0, 1, 0 }, 0, 0, 1, 4);
-			casts.emplace_back(89, IngredientsContainer{ 0, 0, 0, 1 }, 0, 0, 0, 5);
-			casts.emplace_back(91, IngredientsContainer{ 3, 0, 1, -1 }, 0, 1, 1, 6);
-			casts.emplace_back(93, IngredientsContainer{ 2, -2, 0, 1 }, 0, 0, 1, 7);
-			casts.emplace_back(95, IngredientsContainer{ -3, 0, 0, 1 }, 0, 0, 1, 8);
-			casts.emplace_back(97, IngredientsContainer{ 2, 2, 0, -1 }, 0, 0, 1, 9);
-			inventory = IngredientsContainer{ 1, 1, 1, 2 };
+			
 
 			auto _1 = ChronoClock::now();
-			auto graph = Logic::Graph(casts, inventory);
+			Logic::gGraph.Initialize(casts, brews, learns, inventory);
 			allGraphTimeDeltas.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - _1).count());
+			graphSizeSum += Logic::gGraph.vertexList.size();
+			graphDepthSum += Logic::gGraph.vertexList.back().depth;
 
-			GraphInfoDump(graph);
 			auto _2 = ChronoClock::now();
-			auto brewHunt = TryHuntBrew(graph.distanceList, brews);
+// 			auto brewHunt = TryHuntBrew(gGraph.distanceList, brews);
+			Logic::ChooseBestMove();
 			allBrewHuntDeltas.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - _2).count());
 			allTimeDeltas.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - gMoveBeginTimePoint).count());
 		}
 		dbg.SummarizeAsserts();
-		fprintf(stderr, "Test time: %lld ms.\n\n", std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
+		fprintf(stderr, "Test time: %lld ms.\n", std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - startTime).count());
+		fprintf(stderr, "Average graph size: %llu.\n", graphSizeSum / iterationsCount);
+		fprintf(stderr, "Average graph depth: %f.\n\n", (float)graphDepthSum / iterationsCount);
 		fprintf(stderr, "Max time: %lld ms.\n", *std::max_element(allTimeDeltas.begin(), allTimeDeltas.end()));
-		fprintf(stderr, "Idmax time: %d.\n", std::max_element(allTimeDeltas.begin(), allTimeDeltas.end()) - allTimeDeltas.begin());
+		fprintf(stderr, "Idmax time: %llu.\n", std::max_element(allTimeDeltas.begin(), allTimeDeltas.end()) - allTimeDeltas.begin());
 		fprintf(stderr, "Average time: %f ms.\n\n", (float)std::accumulate(allTimeDeltas.begin(), allTimeDeltas.end(), 0ll) / allTimeDeltas.size());
 		fprintf(stderr, "Max graph time: %lld ms.\n", *std::max_element(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end()));
-		fprintf(stderr, "Idmax graph time: %d.\n", std::max_element(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end()) - allGraphTimeDeltas.begin());
+		fprintf(stderr, "Idmax graph time: %llu.\n", std::max_element(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end()) - allGraphTimeDeltas.begin());
 		fprintf(stderr, "Average graph time: %f ms.\n\n", (float)std::accumulate(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end(), 0ll) / allGraphTimeDeltas.size());
 		fprintf(stderr, "Max hunt time: %lld ms.\n", *std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()));
-		fprintf(stderr, "Idmax hunt time: %d.\n", std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()) - allBrewHuntDeltas.begin());
+		fprintf(stderr, "Idmax hunt time: %llu.\n", std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()) - allBrewHuntDeltas.begin());
 		fprintf(stderr, "Average hunt time: %f ms.\n\n", (float)std::accumulate(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end(), 0ll) / allBrewHuntDeltas.size());
-		__debugbreak();
-	}
+// 		__debugbreak();
+	}	
 	#endif
 }
 
@@ -1449,21 +1536,18 @@ int main()
 
 	for (int moveNumber = 1; ; moveNumber++)
 	{
-		ActionsContainer brews, casts, opponent_casts, learns;
+		BrewsContainer brews;
+		CastsContainer casts, opponent_casts;
+		LearnsContainer learns;
 		PlayerInfo localInfo, enemyInfo;
 		Reading::Do(brews, casts, opponent_casts, learns, localInfo, enemyInfo);
 		gMoveBeginTimePoint = ChronoClock::now();
 
-		static int debugIdleCounter = 0;
-		static int debugBlindCastCounter = 0;
-		std::string answer = Logic::DoMain(moveNumber, localInfo, enemyInfo, brews, casts, opponent_casts, learns, 
-			debugIdleCounter, debugBlindCastCounter);
+		std::string answer = Logic::DoMain(moveNumber, localInfo, enemyInfo, brews, casts, opponent_casts, learns);
 
 		Submitting::Submit(answer, moveNumber);
 
 		#if DEBUG
-		dbg.Print("Idle counter: %d.\n", debugIdleCounter);
-		dbg.Print("Blind cast counter: %d.\n", debugBlindCastCounter);
 		dbg.SummarizeAsserts();
 		#endif
 

@@ -74,6 +74,8 @@ constexpr int kMaxEdgesFromVertex = kMaxCastsCount * (kInventoryCapacity / 2) + 
 constexpr size_t kMaxGraphVertexListSize = 400000;
 constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 30;
 constexpr int kGraphCheckTimeLimitPeriod = 50;
+constexpr float kIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
+constexpr float kMaxInventoryWorth = kIngredientCost[kIngredients - 1] * kInventoryCapacity;
 #pragma endregion
 #pragma endregion
 
@@ -82,7 +84,6 @@ using IngredientsContainer = std::array<int, kIngredients>;
 #pragma region Globals
 std::mt19937 gRng(5);
 std::mt19937 gNotDetRng((uint32_t)ChronoClock::now().time_since_epoch().count()); // Not deterministic random (seeded with time).
-float gIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
 ChronoClock::time_point gMoveBeginTimePoint;
 #pragma endregion
 
@@ -796,7 +797,7 @@ namespace Logic
 		float result = 0.0f;
 		for (size_t i = 0; i < ingredients.size(); i++)
 		{
-			result += ingredients[i] * gIngredientCost[i];
+			result += ingredients[i] * kIngredientCost[i];
 		}
 		return result;
 	}
@@ -1165,44 +1166,16 @@ namespace Logic
 	#pragma region Main
 	float Estimate(const Graph::VertexInfo* vertex)
 	{
-		return +vertex->brewsPrice * 1.0f
-			- vertex->minBrewDepth * 2.0f
-			+ (float)vertex->castable.count() / vertex->casts.size() * 1.0f
-			+ vertex->casts.size() * 0.5f
-			+ IngredientsWorth(vertex->inventory) * 0.03f
-			- vertex->depth * 1.2f
-			;
+		return
+			+vertex->brewsPrice * 1.0f
+			+vertex->casts.size() * 1.0f
+			+IngredientsWorth(vertex->inventory) * 0.04f
+			-vertex->depth * 1.25f;
 	}
 
 	bool PathsComparator(const Graph::VertexInfo* lhs, const Graph::VertexInfo* rhs)
 	{
 		return Estimate(lhs) < Estimate(rhs);
-		if (lhs->brewCount != rhs->brewCount)
-		{
-			return lhs->brewCount < rhs->brewCount;
-		}
-
-		if (lhs->brewCount != 0)
-		{
-			constexpr static auto estimate = [](const Graph::VertexInfo* vertex) -> float {
-				return vertex->brewsPrice * 2.0f - vertex->minBrewDepth * 3.0f +
-					(float)vertex->castable.count() / vertex->casts.size() * 1.0f +
-					vertex->casts.size() * 1.0f +
-					IngredientsWorth(vertex->inventory) * 0.02f -
-					vertex->depth * 1.1f;
-			};
-			return estimate(lhs) < estimate(rhs);
-		}
-		else
-		{
-			constexpr static auto estimate = [](const Graph::VertexInfo* vertex) -> float {
-				return IngredientsWorth(vertex->inventory) * 0.05f +
-					(float)vertex->castable.count() / vertex->casts.size() * 1.0f +
-					vertex->casts.size() * 1.0f -
-					vertex->depth * 1.1f;
-			};
-			return estimate(lhs) < estimate(rhs);
-		}
 	}
 
 	auto TracePathToVertex(const Graph::VertexInfo* vertex)

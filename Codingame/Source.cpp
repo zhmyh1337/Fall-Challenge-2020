@@ -24,7 +24,7 @@
 #endif
 
 #pragma region Pragmas
-#if not LOCAL_MACHINE and 0
+#if not LOCAL_MACHINE and 1
 #pragma GCC optimize "Ofast,unroll-loops,omit-frame-pointer,inline"
 #pragma GCC option("arch=native", "tune=native", "no-zero-upper")
 #pragma GCC target("rdrnd", "popcnt", "avx", "bmi2")
@@ -32,7 +32,7 @@
 #pragma endregion
 
 #pragma region ChangeableMacros
-#define DEBUG_ACTIVE 1
+#define DEBUG_ACTIVE 0
 #define TIMERS_ACTIVE 1
 #define ASSERTS_ACTIVE 1
 #define ASSERTS_CAUSE_DEBUG_BREAK LOCAL_MACHINE and 1
@@ -71,8 +71,8 @@ constexpr int kStopLearningAfter = 10;
 constexpr size_t kMaxCastsCount = kStartCastCount + kFullTomeSize;
 constexpr size_t kAllActionsCapacity = kBrewsCount + 2 * kStartCastCount + 2 * kFullTomeSize;
 constexpr int kMaxEdgesFromVertex = kMaxCastsCount * (kInventoryCapacity / 2) + 1 + kBrewsCount + kTomeCapacity;
-constexpr size_t kMaxGraphVertexListSize = 400000;
-constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 30;
+constexpr size_t kMaxGraphVertexListSize = 1000000;
+constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 35;
 constexpr int kGraphCheckTimeLimitPeriod = 50;
 constexpr float kIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
 constexpr float kMaxInventoryWorth = kIngredientCost[kIngredients - 1] * kInventoryCapacity;
@@ -254,19 +254,23 @@ private:
 
 class DummyDebugger : public IDebugger
 {
-	void Assert(bool assertion, int line, const char* expr, const char* message = nullptr) override
+	void Assert(bool assertion, int line, const char* expr, const char* message) override
 	{
 	}
+
+	void SummarizeAsserts() override
+	{
+	}
+
 	void Print(const char* message, ...) override
 	{
 	}
+
 	void NewLine() override
 	{
 	}
+
 	void Separator() override
-	{
-	}
-	void SummarizeAsserts() override
 	{
 	}
 };
@@ -662,6 +666,51 @@ namespace my
 		ChronoClock::time_point _startPoint;
 	};
 	#pragma warning(pop)
+
+	template<typename T, size_t _capacity>
+	class queue
+	{
+		T data[_capacity];
+		T* left = data;
+		T* right = data;
+
+	public:
+		void clear()
+		{
+			left = right = data;
+		}
+
+		template <typename... Ts>
+		void emplace(Ts&&... args)
+		{
+			*right++ = T(std::forward<Ts>(args)...);
+		}
+
+		void push(const T& x)
+		{
+			*right++ = x;
+		}
+
+		size_t size() const
+		{
+			return right - left;
+		}
+
+		bool empty() const
+		{
+			return !size();
+		}
+
+		T& front()
+		{
+			return *left;
+		}
+
+		void pop()
+		{
+			left++;
+		}
+	};
 }
 #pragma endregion
 
@@ -996,19 +1045,17 @@ namespace Logic
 		my::vector<VertexInfo, kMaxGraphVertexListSize> vertexList;
 
 	private:
-		auto GetRestEdgeOfVertex(VertexInfo* vertex)
+		void AppendRestVertexOfVertex(my::vector<VertexInfo*, kMaxEdgesFromVertex>& newVerticesList, VertexInfo* vertex)
 		{
 			Edge reverseEdge(EdgeType::Rest, vertex);
 			vertexList.emplace_back(reverseEdge, vertex->inventory, vertex->casts, vertex->taxes, (1ll << vertex->casts.size()) - 1,
 				vertex->depth + 1, vertex->learned, vertex->brewed, vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
 			);
-			return Edge(reverseEdge, &vertexList.back());
+			newVerticesList.emplace_back(&vertexList.back());
 		}
 
-		auto GetBrewEdgesOfVertex(VertexInfo* vertex)
+		void AppendBrewVerticesOfVertex(my::vector<VertexInfo*, kMaxEdgesFromVertex>& newVerticesList, VertexInfo* vertex)
 		{
-			my::vector<Edge, kBrewsCount> edges;
-
 			for (size_t i = 0; i < kBrewsCount; i++)
 			{
 				if (!vertex->brewed[i] && CanBrew((*_brews)[i], vertex->inventory))
@@ -1022,17 +1069,13 @@ namespace Logic
 						vertex->brewCount + 1, vertex->brewCount ? vertex->minBrewDepth : vertex->depth,
 						vertex->brewsPrice + (*_brews)[i].price
 					);
-					edges.emplace_back(reverseEdge, &vertexList.back());
+					newVerticesList.emplace_back(&vertexList.back());
 				}
 			}
-
-			return edges;
 		}
 
-		auto GetLearnEdgesOfVertex(VertexInfo* vertex)
+		void AppendLearnVerticesOfVertex(my::vector<VertexInfo*, kMaxEdgesFromVertex>& newVerticesList, VertexInfo* vertex)
 		{
-			my::vector<Edge, kTomeCapacity> edges;
-
 			for (size_t i = 0; i < _learns->size(); i++)
 			{
 				if (!vertex->learned[i] && CanLearn((*_learns)[i], vertex->inventory))
@@ -1059,17 +1102,13 @@ namespace Logic
 						vertex->depth + 1, vertex->learned | VertexInfo::LearnedBitset(1ll << i),
 						vertex->brewed, vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
 					);
-					edges.emplace_back(reverseEdge, &vertexList.back());
+					newVerticesList.emplace_back(&vertexList.back());
 				}
 			}
-
-			return edges;
 		}
 
-		auto GetCastEdgesOfVertex(VertexInfo* vertex)
+		void AppendCastVerticesOfVertex(my::vector<VertexInfo*, kMaxEdgesFromVertex>& newVerticesList, VertexInfo* vertex)
 		{
-			my::vector<Edge, kMaxCastsCount> edges;
-
 			for (size_t i = 0; i < vertex->casts.size(); i++)
 			{
 				if (vertex->castable[i])
@@ -1090,42 +1129,25 @@ namespace Logic
 							vertex->depth + 1, vertex->learned, vertex->brewed,
 							vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
 						);
-						edges.emplace_back(reverseEdge, &vertexList.back());
+						
+						newVerticesList.emplace_back(&vertexList.back());
 					}
 				}
 			}
-
-			return edges;
 		}
 
-		auto GetEdgesOfVertex(VertexInfo* vertex)
+		void AppendAllVerticesOfVertex(my::vector<VertexInfo*, kMaxEdgesFromVertex>& newVerticesList, VertexInfo* vertex)
 		{
-			my::vector<Edge, kMaxEdgesFromVertex> edges;
-
-			edges.emplace_back(GetRestEdgeOfVertex(vertex));
-			
-			for (const auto& edge : GetBrewEdgesOfVertex(vertex))
-			{
-				edges.emplace_back(edge);
-			}
-
-			for (const auto& edge : GetLearnEdgesOfVertex(vertex))
-			{
-				edges.emplace_back(edge);
-			}
-
-			for (const auto& edge : GetCastEdgesOfVertex(vertex))
-			{
-				edges.emplace_back(edge);
-			}
-			
-		 	return edges;
+			AppendRestVertexOfVertex(newVerticesList, vertex);
+			AppendBrewVerticesOfVertex(newVerticesList, vertex);
+			AppendLearnVerticesOfVertex(newVerticesList, vertex);
+			AppendCastVerticesOfVertex(newVerticesList, vertex);
 		}
 
 		void BFS()
 		{
-			static std::queue<VertexInfo*> q;
-			while (!q.empty()) q.pop();
+			static my::queue<VertexInfo*, kMaxGraphVertexListSize> q;
+			q.clear();
 			q.emplace(&vertexList.front());
 
 			int timerHelperLastCount = 0;
@@ -1147,9 +1169,12 @@ namespace Logic
 
 				vertex->isLeaf = false;
 
-				for (const auto& edge : GetEdgesOfVertex(vertex))
+				my::vector<VertexInfo*, kMaxEdgesFromVertex> newVerticesList;
+				newVerticesList.clear();
+				AppendAllVerticesOfVertex(newVerticesList, vertex);
+				for (auto newVertex : newVerticesList)
 				{
-					q.emplace(edge.vertex);
+					q.emplace(newVertex);
 				}
 			}
 		}
@@ -1436,7 +1461,7 @@ void Preprocessing()
 	#if LOCAL_MACHINE and 1
 	{
 		auto startTime = ChronoClock::now();
-		constexpr size_t iterationsCount = 20;
+		constexpr size_t iterationsCount = 50;
 		std::vector<int64_t> allTimeDeltas, allGraphTimeDeltas, allBrewHuntDeltas;
 		size_t graphSizeSum = 0;
 		size_t graphDepthSum = 0;
@@ -1471,7 +1496,29 @@ void Preprocessing()
 // 	 
 // 	 		inventory = { 1, 1, 1, 1 };
 
-			
+			brews.emplace_back(54, IngredientsContainer{ 0, -2, 0, -2 }, 15);
+			brews.emplace_back(64, IngredientsContainer{ 0, 0, -2, -3 }, 19);
+			brews.emplace_back(57, IngredientsContainer{ 0, 0, -2, -2 }, 14);
+			brews.emplace_back(74, IngredientsContainer{ -3, -1, -1, -1 }, 14);
+			brews.emplace_back(52, IngredientsContainer{ -3, 0, 0, -2 }, 11);
+			casts.emplace_back(78, IngredientsContainer{ 2, 0, 0, 0 }, 1, 0);
+			casts.emplace_back(79, IngredientsContainer{ -1, 1, 0, 0 }, 1, 0);
+			casts.emplace_back(80, IngredientsContainer{ 0, -1, 1, 0 }, 1, 0);
+			casts.emplace_back(81, IngredientsContainer{ 0, 0, -1, 1 }, 1, 0);
+			casts.emplace_back(86, IngredientsContainer{ 2, 1, 0, 0 }, 1, 0);
+			casts.emplace_back(88, IngredientsContainer{ -2, 0, -1, 2 }, 1, 1);
+			casts.emplace_back(90, IngredientsContainer{ 0, 3, 2, -2 }, 1, 1);
+			casts.emplace_back(92, IngredientsContainer{ 0, 2, -1, 0 }, 1, 1);
+			casts.emplace_back(93, IngredientsContainer{ -4, 0, 2, 0 }, 1, 1);
+			casts.emplace_back(94, IngredientsContainer{ -3, 1, 1, 0 }, 1, 1);
+			casts.emplace_back(96, IngredientsContainer{ 1, 2, -1, 0 }, 1, 1);
+			learns.emplace_back(17, IngredientsContainer{ -2, 0, 1, 0 }, 0, 1, 1);
+			learns.emplace_back(14, IngredientsContainer{ 0, 0, 0, 1 }, 1, 1, 0);
+			learns.emplace_back(29, IngredientsContainer{ -5, 0, 0, 2 }, 2, 0, 1);
+			learns.emplace_back(6, IngredientsContainer{ 2, 1, -2, 1 }, 3, 0, 1);
+			learns.emplace_back(38, IngredientsContainer{ -2, 2, 0, 0 }, 4, 0, 1);
+			learns.emplace_back(25, IngredientsContainer{ 0, -3, 0, 2 }, 5, 0, 1);
+			inventory = IngredientsContainer{ 1, 1, 0, 0 };
 
 			auto _1 = ChronoClock::now();
 			Logic::gGraph.Initialize(casts, brews, learns, inventory);
@@ -1480,7 +1527,6 @@ void Preprocessing()
 			graphDepthSum += Logic::gGraph.vertexList.back().depth;
 
 			auto _2 = ChronoClock::now();
-// 			auto brewHunt = TryHuntBrew(gGraph.distanceList, brews);
 			Logic::ChooseBestMove();
 			allBrewHuntDeltas.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - _2).count());
 			allTimeDeltas.push_back(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - gMoveBeginTimePoint).count());
@@ -1495,10 +1541,13 @@ void Preprocessing()
 		fprintf(stderr, "Max graph time: %lld ms.\n", *std::max_element(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end()));
 		fprintf(stderr, "Idmax graph time: %llu.\n", std::max_element(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end()) - allGraphTimeDeltas.begin());
 		fprintf(stderr, "Average graph time: %f ms.\n\n", (float)std::accumulate(allGraphTimeDeltas.begin(), allGraphTimeDeltas.end(), 0ll) / allGraphTimeDeltas.size());
-		fprintf(stderr, "Max hunt time: %lld ms.\n", *std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()));
-		fprintf(stderr, "Idmax hunt time: %llu.\n", std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()) - allBrewHuntDeltas.begin());
-		fprintf(stderr, "Average hunt time: %f ms.\n\n", (float)std::accumulate(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end(), 0ll) / allBrewHuntDeltas.size());
+		fprintf(stderr, "Max choose time: %lld ms.\n", *std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()));
+		fprintf(stderr, "Idmax choose time: %llu.\n", std::max_element(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end()) - allBrewHuntDeltas.begin());
+		fprintf(stderr, "Average choose time: %f ms.\n\n", (float)std::accumulate(allBrewHuntDeltas.begin(), allBrewHuntDeltas.end(), 0ll) / allBrewHuntDeltas.size());
+		#if LOCAL_MACHINE
+		exit(0);
 // 		__debugbreak();
+		#endif
 	}	
 	#endif
 }

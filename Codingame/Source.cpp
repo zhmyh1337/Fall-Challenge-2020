@@ -32,7 +32,7 @@
 #pragma endregion
 
 #pragma region ChangeableMacros
-#define DEBUG_ACTIVE 0
+#define DEBUG_ACTIVE !LOCAL_MACHINE
 #define TIMERS_ACTIVE 1
 #define ASSERTS_ACTIVE 1
 #define ASSERTS_CAUSE_DEBUG_BREAK LOCAL_MACHINE and 1
@@ -71,7 +71,8 @@ constexpr int kStopLearningAfter = 10;
 constexpr size_t kMaxCastsCount = kStartCastCount + kFullTomeSize;
 constexpr size_t kAllActionsCapacity = kBrewsCount + 2 * kStartCastCount + 2 * kFullTomeSize;
 constexpr int kMaxEdgesFromVertex = kMaxCastsCount * (kInventoryCapacity / 2) + 1 + kBrewsCount + kTomeCapacity;
-constexpr size_t kMaxGraphVertexListSize = 1000000;
+constexpr size_t kMaxGraphVertexListSize = 2000000;
+constexpr size_t kMaxLearnsPerPath = 2;
 constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 35;
 constexpr int kGraphCheckTimeLimitPeriod = 50;
 constexpr float kIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
@@ -969,12 +970,11 @@ namespace Logic
 		{
 			using CastableBitset = std::bitset<kMaxCastsCount>;
 			using LearnedBitset = std::bitset<kTomeCapacity>;
+			using LearnedCastsCastableBitset = std::bitset<kMaxLearnsPerPath>;
 			using BrewedBitset = std::bitset<kBrewsCount>;
 
 			Edge reverseEdge;
 			IngredientsContainer inventory;
-			my::vector<const Action*, kMaxCastsCount> casts;
-			std::array<int, kTomeCapacity> taxes;
 			CastableBitset castable;
 
 			bool isLeaf;
@@ -985,6 +985,8 @@ namespace Logic
 			int brewCount;
 			int minBrewDepth;
 			int brewsPrice;
+			my::vector<const Action*, kMaxLearnsPerPath> learnedCasts;
+			LearnedCastsCastableBitset learnedCastsCastable;
 
 			#pragma warning(push)
 			#pragma warning(disable : 26495)
@@ -993,15 +995,16 @@ namespace Logic
 			}
 			#pragma warning(pop)
 
-			VertexInfo(const Edge& reverseEdge, const IngredientsContainer& inventory,
-				const decltype(casts)& casts, const decltype(taxes)& taxes, CastableBitset castable,
+			VertexInfo(const Edge& reverseEdge, const IngredientsContainer& inventory, CastableBitset castable,
 				int depth = 0, LearnedBitset learned = 0, BrewedBitset brewed = 0,
-				int brewCount = 0, int minBrewDepth = 0, int brewsPrice = 0
+				int brewCount = 0, int minBrewDepth = 0, int brewsPrice = 0,
+				const decltype(learnedCasts)& learnedCasts = {}, LearnedCastsCastableBitset learnedCastsCastable = 0
 			)
-				: reverseEdge(reverseEdge), inventory(inventory), casts(casts), taxes(taxes), castable(castable),
+				: reverseEdge(reverseEdge), inventory(inventory), castable(castable),
 				isLeaf(true),
-				depth(depth), learned(learned), brewed(brewed),
-				brewCount(brewCount), minBrewDepth(minBrewDepth), brewsPrice(brewsPrice)
+				depth(depth), learned(learned), brewed(brewed), brewCount(brewCount),
+				minBrewDepth(minBrewDepth), brewsPrice(brewsPrice),
+				learnedCasts(learnedCasts), learnedCastsCastable(learnedCastsCastable)
 			{
 			}
 		};
@@ -1022,21 +1025,13 @@ namespace Logic
 			_inventory = &inventory;
 			vertexList.clear();
 
-			decltype(VertexInfo::taxes) taxes{};
-			for (size_t i = 0; i < (*_learns).size(); i++)
-			{
-				taxes[i] = (*_learns)[i].taxCount;
-			}
-
-			decltype(VertexInfo::casts) castsPtrs;
 			VertexInfo::CastableBitset castable;
 			for (size_t i = 0; i < casts.size(); i++)
 			{
 				castable[i] = casts[i].castable;
-				castsPtrs.emplace_back(&casts[i]);
 			}
 
-			vertexList.emplace_back(Edge(EdgeType::Root), inventory, castsPtrs, taxes, castable);
+			vertexList.emplace_back(Edge(EdgeType::Root), inventory, castable);
 
 			BFS();
 		}
@@ -1048,8 +1043,10 @@ namespace Logic
 		void AppendRestVertexOfVertex(my::vector<VertexInfo*, kMaxEdgesFromVertex>& newVerticesList, VertexInfo* vertex)
 		{
 			Edge reverseEdge(EdgeType::Rest, vertex);
-			vertexList.emplace_back(reverseEdge, vertex->inventory, vertex->casts, vertex->taxes, (1ll << vertex->casts.size()) - 1,
-				vertex->depth + 1, vertex->learned, vertex->brewed, vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
+			vertexList.emplace_back(
+				reverseEdge, vertex->inventory, (1ll << _casts->size()) - 1, vertex->depth + 1,
+				vertex->learned, vertex->brewed, vertex->brewCount, vertex->minBrewDepth,
+				vertex->brewsPrice, vertex->learnedCasts, (1ll << vertex->learnedCasts.size()) - 1
 			);
 			newVerticesList.emplace_back(&vertexList.back());
 		}
@@ -1064,10 +1061,12 @@ namespace Logic
 					ApplyDelta(newInventory, (*_brews)[i].delta);
 
 					Edge reverseEdge(EdgeType::Brew, vertex, &(*_brews)[i]);
-					vertexList.emplace_back(reverseEdge, newInventory, vertex->casts, vertex->taxes, vertex->castable,
-						vertex->depth + 1, vertex->learned, vertex->brewed | VertexInfo::BrewedBitset(1ll << i),
+					vertexList.emplace_back(
+						reverseEdge, newInventory, vertex->castable, vertex->depth + 1, 
+						vertex->learned, vertex->brewed | VertexInfo::BrewedBitset(1ll << i),
 						vertex->brewCount + 1, vertex->brewCount ? vertex->minBrewDepth : vertex->depth,
-						vertex->brewsPrice + (*_brews)[i].price
+						vertex->brewsPrice + (*_brews)[i].price,
+						vertex->learnedCasts, vertex->learnedCastsCastable
 					);
 					newVerticesList.emplace_back(&vertexList.back());
 				}
@@ -1076,31 +1075,29 @@ namespace Logic
 
 		void AppendLearnVerticesOfVertex(my::vector<VertexInfo*, kMaxEdgesFromVertex>& newVerticesList, VertexInfo* vertex)
 		{
+			if (vertex->learnedCasts.size() >= vertex->learnedCasts.capacity())
+			{
+				return;
+			}
+
 			for (size_t i = 0; i < _learns->size(); i++)
 			{
 				if (!vertex->learned[i] && CanLearn((*_learns)[i], vertex->inventory))
 				{
 					auto newInventory = vertex->inventory;
-					newInventory[0] += vertex->taxes[i] - (*_learns)[i].tomeIndex;
+					newInventory[0] += (*_learns)[i].taxCount - (*_learns)[i].tomeIndex;
 					newInventory[0] -= std::max(0, DeltaSum(newInventory) - (int)kInventoryCapacity);
 
-					auto newTaxes = vertex->taxes;
-					for (size_t j = 0; j < i; j++)
-					{
-						if (!vertex->learned[j])
-						{
-							newTaxes[j]++;
-						}
-					}
-
-					auto newCasts = vertex->casts;
-					newCasts.emplace_back(&(*_learns)[i]);
+					auto newLearnedCasts = vertex->learnedCasts;
+					newLearnedCasts.emplace_back(&(*_learns)[i]);
 
 					Edge reverseEdge(EdgeType::Learn, vertex, &(*_learns)[i]);
-					vertexList.emplace_back(reverseEdge, newInventory, newCasts, newTaxes,
-						vertex->castable | VertexInfo::CastableBitset(1ll << vertex->casts.size()),
-						vertex->depth + 1, vertex->learned | VertexInfo::LearnedBitset(1ll << i),
-						vertex->brewed, vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
+					vertexList.emplace_back(
+						reverseEdge, newInventory, vertex->castable, vertex->depth + 1, 
+						vertex->learned | VertexInfo::LearnedBitset(1ll << i), vertex->brewed, 
+						vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice,
+						newLearnedCasts,
+						vertex->learnedCastsCastable | VertexInfo::LearnedCastsCastableBitset(1ll << vertex->learnedCasts.size())
 					);
 					newVerticesList.emplace_back(&vertexList.back());
 				}
@@ -1109,27 +1106,55 @@ namespace Logic
 
 		void AppendCastVerticesOfVertex(my::vector<VertexInfo*, kMaxEdgesFromVertex>& newVerticesList, VertexInfo* vertex)
 		{
-			for (size_t i = 0; i < vertex->casts.size(); i++)
+			for (size_t i = 0; i < _casts->size(); i++)
 			{
 				if (vertex->castable[i])
 				{
 					auto newInventory = vertex->inventory;
 					auto newCastable = vertex->castable ^ VertexInfo::CastableBitset(1ll << i);
 
-					for (int castTimes = 1; vertex->casts[i]->repeatable || castTimes == 1; castTimes++)
+					for (int castTimes = 1; (*_casts)[i].repeatable || castTimes == 1; castTimes++)
 					{
-						ApplyDelta(newInventory, vertex->casts[i]->delta);
+						ApplyDelta(newInventory, (*_casts)[i].delta);
 						if (!CorrectInventory(newInventory))
 						{
 							break;
 						}
 
-						Edge reverseEdge(EdgeType::Cast, vertex, vertex->casts[i], castTimes);
-						vertexList.emplace_back(reverseEdge, newInventory, vertex->casts, vertex->taxes, newCastable,
-							vertex->depth + 1, vertex->learned, vertex->brewed,
-							vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice
+						Edge reverseEdge(EdgeType::Cast, vertex, &(*_casts)[i], castTimes);
+						vertexList.emplace_back(
+							reverseEdge, newInventory, newCastable, vertex->depth + 1, vertex->learned, 
+							vertex->brewed, vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice,
+							vertex->learnedCasts, vertex->learnedCastsCastable
 						);
 						
+						newVerticesList.emplace_back(&vertexList.back());
+					}
+				}
+			}
+
+			for (size_t i = 0; i < vertex->learnedCasts.size(); i++)
+			{
+				if (vertex->learnedCastsCastable[i])
+				{
+					auto newInventory = vertex->inventory;
+					auto newLearnedCastsCastable = vertex->learnedCastsCastable ^ VertexInfo::LearnedCastsCastableBitset(1ll << i);
+
+					for (int castTimes = 1; vertex->learnedCasts[i]->repeatable || castTimes == 1; castTimes++)
+					{
+						ApplyDelta(newInventory, vertex->learnedCasts[i]->delta);
+						if (!CorrectInventory(newInventory))
+						{
+							break;
+						}
+
+						Edge reverseEdge(EdgeType::Cast, vertex, vertex->learnedCasts[i], castTimes);
+						vertexList.emplace_back(
+							reverseEdge, newInventory, vertex->castable, vertex->depth + 1, vertex->learned,
+							vertex->brewed, vertex->brewCount, vertex->minBrewDepth, vertex->brewsPrice,
+							vertex->learnedCasts, newLearnedCastsCastable
+						);
+
 						newVerticesList.emplace_back(&vertexList.back());
 					}
 				}
@@ -1193,9 +1218,10 @@ namespace Logic
 	{
 		return
 			+vertex->brewsPrice * 1.0f
-			+vertex->casts.size() * 1.0f
+			-vertex->minBrewDepth * 1.0f
+			+vertex->learnedCasts.size() * 1.0f
 			+IngredientsWorth(vertex->inventory) * 0.04f
-			-vertex->depth * 1.25f;
+			-vertex->depth * 1.1f;
 	}
 
 	bool PathsComparator(const Graph::VertexInfo* lhs, const Graph::VertexInfo* rhs)
@@ -1461,7 +1487,7 @@ void Preprocessing()
 	#if LOCAL_MACHINE and 1
 	{
 		auto startTime = ChronoClock::now();
-		constexpr size_t iterationsCount = 50;
+		constexpr size_t iterationsCount = 100;
 		std::vector<int64_t> allTimeDeltas, allGraphTimeDeltas, allBrewHuntDeltas;
 		size_t graphSizeSum = 0;
 		size_t graphDepthSum = 0;

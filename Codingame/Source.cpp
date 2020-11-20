@@ -1220,7 +1220,8 @@ namespace Logic
 			+vertex->brewsPrice * 1.0f
 			-vertex->minBrewDepth * 1.0f
 			+vertex->learnedCasts.size() * 1.0f
-			+IngredientsWorth(vertex->inventory) * 0.04f
+			// todo: map inventory to this value (log(worth(inv)))
+			+log(IngredientsWorth(vertex->inventory)) * 5.0f
 			-vertex->depth * 1.1f;
 	}
 

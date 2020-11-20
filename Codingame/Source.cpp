@@ -1214,14 +1214,19 @@ namespace Logic
 	#pragma endregion
 
 	#pragma region Main
+	float InventoryWorthEstimation(const IngredientsContainer& inventory)
+	{
+		return log(IngredientsWorth(inventory)) * 5.0f;
+	}
+	float gInventoryPrecalculatedWorthEstimation[kInventoryCapacity][kInventoryCapacity][kInventoryCapacity][kInventoryCapacity];
+
 	float Estimate(const Graph::VertexInfo* vertex)
 	{
 		return
 			+vertex->brewsPrice * 1.0f
 			-vertex->minBrewDepth * 1.0f
 			+vertex->learnedCasts.size() * 1.0f
-			// todo: map inventory to this value (log(worth(inv)))
-			+log(IngredientsWorth(vertex->inventory)) * 5.0f
+			+gInventoryPrecalculatedWorthEstimation[vertex->inventory[0]][vertex->inventory[1]][vertex->inventory[2]][vertex->inventory[3]]
 			-vertex->depth * 1.1f;
 	}
 
@@ -1485,6 +1490,24 @@ namespace Submitting
 // Mostly for testing (sandbox).
 void Preprocessing()
 {
+	for (int _1 = 0; _1 <= 10; _1++)
+	{
+		for (int _2 = 0; _2 <= 10; _2++)
+		{
+			for (int _3 = 0; _3 <= 10; _3++)
+			{
+				for (int _4 = 0; _4 <= 10; _4++)
+				{
+					auto inventory = IngredientsContainer{ _1, _2, _3, _4 };
+					if (Logic::CorrectInventory(inventory))
+					{
+						Logic::gInventoryPrecalculatedWorthEstimation[_1][_2][_3][_4] = Logic::InventoryWorthEstimation(inventory);
+					}
+				}
+			}
+		}
+	}
+
 	#if LOCAL_MACHINE and 1
 	{
 		auto startTime = ChronoClock::now();

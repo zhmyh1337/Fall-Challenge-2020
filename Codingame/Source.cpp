@@ -15,6 +15,7 @@
 #include <bitset>
 #include <chrono>
 #include <optional>
+#include <cmath>
 #pragma endregion
 
 #if defined(_DEBUG) or defined(NDEBUG)
@@ -66,6 +67,7 @@ constexpr size_t kBrewsToWin = 6;
 #pragma region Changable
 constexpr bool kShowHelloMessage = true;
 constexpr bool kSing = true;
+constexpr bool kInformationSing = true;
 constexpr const char* kHelloMessage = "Кулити";
 constexpr int kStopLearningAfter = 10;
 constexpr size_t kMaxCastsCount = kStartCastCount + kFullTomeSize;
@@ -73,14 +75,15 @@ constexpr size_t kAllActionsCapacity = kBrewsCount + 2 * kStartCastCount + 2 * k
 constexpr int kMaxEdgesFromVertex = kMaxCastsCount * (kInventoryCapacity / 2) + 1 + kBrewsCount + kTomeCapacity;
 constexpr size_t kMaxGraphVertexListSize = 2000000;
 constexpr size_t kMaxLearnsPerPath = 2;
-constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 35;
+constexpr size_t kGraphVerticesLimit = 40000;
+constexpr decltype(std::declval<std::chrono::milliseconds>().count()) kGraphTimeLimit = 25;
 constexpr int kGraphCheckTimeLimitPeriod = 50;
 constexpr float kIngredientCost[kIngredients] = { 0.5f, 1.0f, 2.5f, 3.5f };
 constexpr float kMaxInventoryWorth = kIngredientCost[kIngredients - 1] * kInventoryCapacity;
 #pragma endregion
 #pragma endregion
 
-using IngredientsContainer = std::array<int, kIngredients>;
+using IngredientsContainer = std::array<int8_t, kIngredients>;
 
 #pragma region Globals
 std::mt19937 gRng(5);
@@ -486,10 +489,6 @@ namespace my
 		using const_iterator = const T*;
 		using value_type = T;
 
-		vector()
-		{
-		}
-
 		template <typename... Ts>
 		void emplace_back(Ts&&... args)
 		{
@@ -668,6 +667,8 @@ namespace my
 	};
 	#pragma warning(pop)
 
+	#pragma warning(push)
+	#pragma warning(disable : 26495)
 	template<typename T, size_t _capacity>
 	class queue
 	{
@@ -712,6 +713,7 @@ namespace my
 			left++;
 		}
 	};
+	#pragma warning(pop)
 }
 #pragma endregion
 
@@ -757,7 +759,7 @@ struct Action
 
 	Action(std::istream& in)
 	{
-		in >> actionId >> actionType >> delta[0] >> delta[1] >> delta[2] >> delta[3] >>
+		in >> actionId >> actionType >> (int&)delta[0] >> (int&)delta[1] >> (int&)delta[2] >> (int&)delta[3] >>
 			price >> tomeIndex >> taxCount >> castable >> repeatable;
 	}
 };
@@ -775,7 +777,7 @@ struct PlayerInfo
 
 	PlayerInfo(std::istream& in)
 	{
-		in >> inv[0] >> inv[1] >> inv[2] >> inv[3] >> score;
+		in >> (int&)inv[0] >> (int&)inv[1] >> (int&)inv[2] >> (int&)inv[3] >> score;
 	}
 };
 
@@ -799,10 +801,15 @@ public:
 		return _doneBrews;
 	}
 
+	int GetScore() const
+	{
+		return _lastBalance;
+	}
+
 private:
 	int _lastBalance = 0;
 	int _doneBrews = 0;
-};
+} gMyselfTracker, gEnemyTracker;
 #pragma endregion
 
 #pragma region SomeDefinitions
@@ -1183,6 +1190,11 @@ namespace Logic
 				auto vertex = q.front();
 				q.pop();
 
+				if (vertexList.size() > kGraphVerticesLimit)
+				{
+					return;
+				}
+
 				if (++timerHelperCounter - timerHelperLastCount > kGraphCheckTimeLimitPeriod)
 				{
 					timerHelperLastCount = timerHelperCounter;
@@ -1214,25 +1226,374 @@ namespace Logic
 	#pragma endregion
 
 	#pragma region Main
-	float InventoryWorthEstimation(const IngredientsContainer& inventory)
+	class NeuralNetwork
 	{
-		return log(IngredientsWorth(inventory)) * 5.0f;
-	}
-	float gInventoryPrecalculatedWorthEstimation[kInventoryCapacity][kInventoryCapacity][kInventoryCapacity][kInventoryCapacity];
+	public:
+		NeuralNetwork()
+		{
+// 			neurons = new float*[layersCount];
+// 			biasWeights = new float*[layersCount];
+// 			weights = new float**[layersCount];
+// 
+// 			for (size_t i = 0; i < layersCount; i++)
+// 			{
+// 				neurons[i] = new float[layersSizes[i]];
+// 			}
+// 
+// 			for (size_t i = 1; i < layersCount; i++)
+// 			{
+// 				biasWeights[i] = new float[layersSizes[i]];
+// 			}
+// 
+// 			for (size_t i = 1; i < layersCount; i++)
+// 			{
+// 				weights[i] = new float*[layersSizes[i]];
+// 				for (size_t j = 0; j < layersSizes[i]; j++)
+// 				{
+// 					weights[i][j] = new float[layersSizes[i - 1]];
+// 				}
+// 			}
 
+			SetWeights();
+		}
+
+		#if LOCAL_MACHINE
+		__declspec(noinline)
+		#endif
+		void Propagate()
+		{
+			for (size_t i = 1; i < layersCount; i++)
+			{
+				for (size_t j = 0; j < layersSizes[i]; j++)
+				{
+					neurons[i][j] = biasWeights[i][j];
+					for (size_t k = 0; k < layersSizes[i - 1]; k++)
+					{
+						neurons[i][j] += neurons[i - 1][k] * weights[i][j][k];
+					}
+				}
+			}
+		}
+
+	private:
+		void SetWeights()
+		{
+			biasWeights[1][0] = -.5479497f;
+			biasWeights[1][1] = .103107f;
+			biasWeights[1][2] = 1.649468f;
+			biasWeights[1][3] = .1152852f;
+			biasWeights[1][4] = -.2474401f;
+			biasWeights[1][5] = .1843906f;
+			biasWeights[1][6] = -.2045283f;
+			biasWeights[1][7] = -.8285051f;
+			biasWeights[1][8] = -.07187015f;
+			biasWeights[1][9] = 1.076015f;
+			biasWeights[2][0] = -.3713256f;
+			biasWeights[2][1] = -.7967325f;
+			biasWeights[2][2] = .347912f;
+			biasWeights[2][3] = .7824444f;
+			biasWeights[2][4] = .1047546f;
+			biasWeights[2][5] = .7434325f;
+			biasWeights[2][6] = -.336061f;
+			biasWeights[3][0] = -.4476172f;
+			biasWeights[3][1] = .9782897f;
+			biasWeights[3][2] = .8038584f;
+			biasWeights[3][3] = .3365017f;
+			biasWeights[3][4] = -.8288228f;
+			biasWeights[4][0] = .261638f;
+
+			weights[1][0][0] = .2528998f;
+			weights[1][0][1] = -.2662374f;
+			weights[1][0][2] = -.01222837f;
+			weights[1][0][3] = -.2743579f;
+			weights[1][0][4] = .4367718f;
+			weights[1][0][5] = .9294345f;
+			weights[1][0][6] = -.08072391f;
+			weights[1][0][7] = -1.272816f;
+			weights[1][0][8] = -.8711374f;
+			weights[1][0][9] = -.6624678f;
+			weights[1][1][0] = .7891476f;
+			weights[1][1][1] = .2053468f;
+			weights[1][1][2] = .5710225f;
+			weights[1][1][3] = -.1312696f;
+			weights[1][1][4] = -.06601107f;
+			weights[1][1][5] = .695123f;
+			weights[1][1][6] = .6627811f;
+			weights[1][1][7] = 1.071865f;
+			weights[1][1][8] = .2049464f;
+			weights[1][1][9] = -.4021744f;
+			weights[1][2][0] = -.1291547f;
+			weights[1][2][1] = -.8906752f;
+			weights[1][2][2] = -.9906906f;
+			weights[1][2][3] = -.1272235f;
+			weights[1][2][4] = -.842257f;
+			weights[1][2][5] = -1.008027f;
+			weights[1][2][6] = -1.014397f;
+			weights[1][2][7] = -.1364765f;
+			weights[1][2][8] = .4085108f;
+			weights[1][2][9] = -.6117935f;
+			weights[1][3][0] = -.6357324f;
+			weights[1][3][1] = .2672631f;
+			weights[1][3][2] = -1.140855f;
+			weights[1][3][3] = -1.541782f;
+			weights[1][3][4] = -.5533729f;
+			weights[1][3][5] = -.2963271f;
+			weights[1][3][6] = .6952418f;
+			weights[1][3][7] = -.4138355f;
+			weights[1][3][8] = .1008788f;
+			weights[1][3][9] = -.1775931f;
+			weights[1][4][0] = .7070262f;
+			weights[1][4][1] = -.004996061f;
+			weights[1][4][2] = -.2290836f;
+			weights[1][4][3] = -.8827545f;
+			weights[1][4][4] = -.6978866f;
+			weights[1][4][5] = -1.167688f;
+			weights[1][4][6] = .5871309f;
+			weights[1][4][7] = -.4952454f;
+			weights[1][4][8] = .8309115f;
+			weights[1][4][9] = .1865632f;
+			weights[1][5][0] = -.946095f;
+			weights[1][5][1] = -.008886993f;
+			weights[1][5][2] = -.5602939f;
+			weights[1][5][3] = .1391259f;
+			weights[1][5][4] = -.08962107f;
+			weights[1][5][5] = .443424f;
+			weights[1][5][6] = -.5919044f;
+			weights[1][5][7] = -.8850049f;
+			weights[1][5][8] = -.5547545f;
+			weights[1][5][9] = -.07270592f;
+			weights[1][6][0] = .926011f;
+			weights[1][6][1] = -.7177459f;
+			weights[1][6][2] = -.4379252f;
+			weights[1][6][3] = .4985409f;
+			weights[1][6][4] = -1.143897f;
+			weights[1][6][5] = -.654201f;
+			weights[1][6][6] = -.3103582f;
+			weights[1][6][7] = .1844462f;
+			weights[1][6][8] = -.6745481f;
+			weights[1][6][9] = -.2564582f;
+			weights[1][7][0] = .999881f;
+			weights[1][7][1] = .3645811f;
+			weights[1][7][2] = -.4198595f;
+			weights[1][7][3] = -.264191f;
+			weights[1][7][4] = -.7037536f;
+			weights[1][7][5] = .7802591f;
+			weights[1][7][6] = .5807354f;
+			weights[1][7][7] = 1.560576f;
+			weights[1][7][8] = -.817209f;
+			weights[1][7][9] = -.7778218f;
+			weights[1][8][0] = -.8852502f;
+			weights[1][8][1] = 1.276483f;
+			weights[1][8][2] = .1065359f;
+			weights[1][8][3] = -.6043265f;
+			weights[1][8][4] = .1968153f;
+			weights[1][8][5] = -.4627485f;
+			weights[1][8][6] = .2925947f;
+			weights[1][8][7] = .07892494f;
+			weights[1][8][8] = .5806838f;
+			weights[1][8][9] = .6244373f;
+			weights[1][9][0] = .5372158f;
+			weights[1][9][1] = .5125873f;
+			weights[1][9][2] = -.8590809f;
+			weights[1][9][3] = -.7702805f;
+			weights[1][9][4] = -.2055689f;
+			weights[1][9][5] = .4968234f;
+			weights[1][9][6] = -1.346956f;
+			weights[1][9][7] = .2640903f;
+			weights[1][9][8] = .7681646f;
+			weights[1][9][9] = 1.072824f;
+			weights[2][0][0] = .4457051f;
+			weights[2][0][1] = -.4586424f;
+			weights[2][0][2] = -.5575873f;
+			weights[2][0][3] = -.2066777f;
+			weights[2][0][4] = .0643239f;
+			weights[2][0][5] = -.02271163f;
+			weights[2][0][6] = .4046485f;
+			weights[2][0][7] = .2789639f;
+			weights[2][0][8] = -.2682675f;
+			weights[2][0][9] = .02521622f;
+			weights[2][1][0] = 1.029627f;
+			weights[2][1][1] = -.3099403f;
+			weights[2][1][2] = .1499966f;
+			weights[2][1][3] = -.9292145f;
+			weights[2][1][4] = -.8985267f;
+			weights[2][1][5] = -.1911244f;
+			weights[2][1][6] = .07662928f;
+			weights[2][1][7] = .7353839f;
+			weights[2][1][8] = -1.123023f;
+			weights[2][1][9] = -.9221045f;
+			weights[2][2][0] = .1274f;
+			weights[2][2][1] = .7033213f;
+			weights[2][2][2] = .9121609f;
+			weights[2][2][3] = .005014658f;
+			weights[2][2][4] = .7163705f;
+			weights[2][2][5] = -.704545f;
+			weights[2][2][6] = .165956f;
+			weights[2][2][7] = -.3588098f;
+			weights[2][2][8] = .9868898f;
+			weights[2][2][9] = 1.069103f;
+			weights[2][3][0] = -.03275782f;
+			weights[2][3][1] = .810928f;
+			weights[2][3][2] = -.8048787f;
+			weights[2][3][3] = -.7132386f;
+			weights[2][3][4] = -.454472f;
+			weights[2][3][5] = -.5768313f;
+			weights[2][3][6] = .1729208f;
+			weights[2][3][7] = -1.018013f;
+			weights[2][3][8] = .9295489f;
+			weights[2][3][9] = 1.187502f;
+			weights[2][4][0] = .2168343f;
+			weights[2][4][1] = .9053437f;
+			weights[2][4][2] = -.7463222f;
+			weights[2][4][3] = -.07068431f;
+			weights[2][4][4] = .1533276f;
+			weights[2][4][5] = -.1527293f;
+			weights[2][4][6] = -1.343978f;
+			weights[2][4][7] = .3050795f;
+			weights[2][4][8] = -1.308127f;
+			weights[2][4][9] = -.4429565f;
+			weights[2][5][0] = -.5293161f;
+			weights[2][5][1] = -.3832619f;
+			weights[2][5][2] = .1065595f;
+			weights[2][5][3] = 1.131024f;
+			weights[2][5][4] = .4917244f;
+			weights[2][5][5] = .8384802f;
+			weights[2][5][6] = -.1045517f;
+			weights[2][5][7] = .5836747f;
+			weights[2][5][8] = .7432402f;
+			weights[2][5][9] = .268533f;
+			weights[2][6][0] = -.3912694f;
+			weights[2][6][1] = -.8073277f;
+			weights[2][6][2] = .908623f;
+			weights[2][6][3] = .1714838f;
+			weights[2][6][4] = .7799314f;
+			weights[2][6][5] = -.8951682f;
+			weights[2][6][6] = -.5051761f;
+			weights[2][6][7] = -.2285018f;
+			weights[2][6][8] = .8714608f;
+			weights[2][6][9] = .6099778f;
+			weights[3][0][0] = .01895487f;
+			weights[3][0][1] = -.07053596f;
+			weights[3][0][2] = 1.170085f;
+			weights[3][0][3] = -.5440374f;
+			weights[3][0][4] = -.1950579f;
+			weights[3][0][5] = .5356205f;
+			weights[3][0][6] = .3884263f;
+			weights[3][1][0] = -.1950004f;
+			weights[3][1][1] = .6003371f;
+			weights[3][1][2] = -.6409447f;
+			weights[3][1][3] = -.3317004f;
+			weights[3][1][4] = .01784575f;
+			weights[3][1][5] = -.8739614f;
+			weights[3][1][6] = .4918788f;
+			weights[3][2][0] = -.09477806f;
+			weights[3][2][1] = -.4168762f;
+			weights[3][2][2] = .1734984f;
+			weights[3][2][3] = -.5512671f;
+			weights[3][2][4] = .7854345f;
+			weights[3][2][5] = .6362284f;
+			weights[3][2][6] = .4311618f;
+			weights[3][3][0] = .8210127f;
+			weights[3][3][1] = -.8302097f;
+			weights[3][3][2] = -.3405562f;
+			weights[3][3][3] = 1.21541f;
+			weights[3][3][4] = -.3719326f;
+			weights[3][3][5] = -.4208217f;
+			weights[3][3][6] = -.06417966f;
+			weights[3][4][0] = .741372f;
+			weights[3][4][1] = .2998457f;
+			weights[3][4][2] = -1.325159f;
+			weights[3][4][3] = .8446721f;
+			weights[3][4][4] = -.5287423f;
+			weights[3][4][5] = -1.30308f;
+			weights[3][4][6] = .5380887f;
+			weights[4][0][0] = .4907302f;
+			weights[4][0][1] = -.3915658f;
+			weights[4][0][2] = -.3365276f;
+			weights[4][0][3] = -.0585537f;
+			weights[4][0][4] = .6068579f;
+		}
+
+		static constexpr size_t inputNeuronsCount = 10;
+		static constexpr size_t outputNeuronsCount = 1;
+		static constexpr size_t hiddenLayersCount = 3;
+		static constexpr size_t layersCount = 1 + hiddenLayersCount + 1;
+		static constexpr size_t layersSizes[layersCount] = {
+			inputNeuronsCount,
+			10,
+			7,
+			5,
+			outputNeuronsCount
+		};
+		static constexpr size_t maxLayerSize = inputNeuronsCount;
+
+		float biasWeights[layersCount][maxLayerSize];
+		float weights[layersCount][maxLayerSize][maxLayerSize];
+// 		float** biasWeights;
+// 		float*** weights;
+
+	public:
+		static constexpr size_t inputLayerIndex = 0;
+		static constexpr size_t outputLayerIndex = layersCount - 1;
+
+// 		float** neurons;
+		float neurons[layersCount][maxLayerSize];
+
+	}gNeuralNetwork;
+
+	namespace Weights
+	{
+		constexpr float w0 = .6954374f;
+		constexpr float w1 = 5.0f;
+		constexpr float w2 = .8983427f;
+		constexpr float w3 = -1.033479f;
+		constexpr float w4 = .8654229f;
+		constexpr float w5 = -1.1f;
+		constexpr float w6 = .05986932f;
+	}
+
+	float InventoryLogWorthEstimation(const IngredientsContainer& inventory)
+	{
+		return log(IngredientsWorth(inventory) + Weights::w0) * Weights::w1;
+	}
+	float gInventoryPrecalculatedLogWorthEstimation[kInventoryCapacity + 1][kInventoryCapacity + 1][kInventoryCapacity + 1][kInventoryCapacity + 1];
+	float gInventoryPrecalculatedWorthEstimation[kInventoryCapacity + 1][kInventoryCapacity + 1][kInventoryCapacity + 1][kInventoryCapacity + 1];
+
+	float NeuralNetworkEstimate(const Graph::VertexInfo* vertex)
+	{
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][0] = (float)gInventoryPrecalculatedWorthEstimation[vertex->inventory[0]][vertex->inventory[1]][vertex->inventory[2]][vertex->inventory[3]] / 35;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][1] = (float)vertex->brewsPrice / 100;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][2] = (float)vertex->minBrewDepth / 10;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][3] = (float)vertex->brewCount / 6;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][4] = (float)vertex->learnedCasts.size() / kMaxCastsCount;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][5] = (float)vertex->depth / 10;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][6] = (float)gMyselfTracker.GetDoneBrews() / 6;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][7] = (float)gMyselfTracker.GetScore() / 150;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][8] = (float)gEnemyTracker.GetDoneBrews() / 6;
+		gNeuralNetwork.neurons[NeuralNetwork::inputLayerIndex][9] = (float)gMyselfTracker.GetScore() / 150;
+		gNeuralNetwork.Propagate();
+		return gNeuralNetwork.neurons[NeuralNetwork::outputLayerIndex][0];
+	}
+	
 	float Estimate(const Graph::VertexInfo* vertex)
 	{
 		return
-			+vertex->brewsPrice * 1.0f
-			-vertex->minBrewDepth * 1.0f
-			+vertex->learnedCasts.size() * 1.0f
-			+gInventoryPrecalculatedWorthEstimation[vertex->inventory[0]][vertex->inventory[1]][vertex->inventory[2]][vertex->inventory[3]]
-			-vertex->depth * 1.1f;
+			+vertex->brewsPrice * Weights::w2
+			+vertex->minBrewDepth * Weights::w3
+			+vertex->learnedCasts.size() * Weights::w4
+			+gInventoryPrecalculatedLogWorthEstimation[vertex->inventory[0]][vertex->inventory[1]][vertex->inventory[2]][vertex->inventory[3]]
+			+vertex->depth * Weights::w5
+			+vertex->brewCount * Weights::w6
+		;
 	}
 
 	bool PathsComparator(const Graph::VertexInfo* lhs, const Graph::VertexInfo* rhs)
 	{
+		#if 1
+		return NeuralNetworkEstimate(lhs) < NeuralNetworkEstimate(rhs);
+		#else
 		return Estimate(lhs) < Estimate(rhs);
+		#endif
 	}
 
 	auto TracePathToVertex(const Graph::VertexInfo* vertex)
@@ -1274,6 +1635,7 @@ namespace Logic
 		}
 	}
 
+	float gChoosenVertexEstimation;
 	std::string ChooseBestMove()
 	{
 		static my::vector<const Graph::VertexInfo*, kMaxGraphVertexListSize> vertexBuf;
@@ -1287,8 +1649,14 @@ namespace Logic
 		}
 
 		auto bestVertex = *std::max_element(vertexBuf.begin(), vertexBuf.end(), PathsComparator);
-		auto trace = TracePathToVertex(bestVertex);
 
+		#if 1
+		gChoosenVertexEstimation = NeuralNetworkEstimate(bestVertex);
+		#else
+		gChoosenVertexEstimation = Estimate(bestVertex);
+		#endif
+
+		auto trace = TracePathToVertex(bestVertex);
 		FinishVertexDump(bestVertex);
 		PathTraceDump(trace);
 
@@ -1298,13 +1666,11 @@ namespace Logic
 	std::string DoMain(int moveNumber, PlayerInfo& localInfo, PlayerInfo& enemyInfo, const BrewsContainer& brews,
 		const CastsContainer& casts, const CastsContainer& opponent_casts, const LearnsContainer& learns)
 	{
-		static auto enemyTracker = EnemyTracker();
-		static auto myselfTracker = EnemyTracker();
-		if (enemyTracker.UpdateBalance(enemyInfo.score))
+		if (gEnemyTracker.UpdateBalance(enemyInfo.score))
 		{
 			dbg.Print("Enemy brewed a potion.\n");
 		}
-		if (myselfTracker.UpdateBalance(localInfo.score))
+		if (gMyselfTracker.UpdateBalance(localInfo.score))
 		{
 			dbg.Print("I brewed a potion.\n");
 		}
@@ -1467,11 +1833,22 @@ namespace Submitting
 		{
 			str.append(std::string(" ") + kHelloMessage);
 		}
-		if (kSing)
+		if constexpr (kSing)
 		{
 			try
 			{
-				str.append(std::string(" ") + Songs::songsList[Songs::songId].at((moveNumber - kShowHelloMessage - 2) / 1));
+				if constexpr (kInformationSing)
+				{
+					str.append(std::string(" ") + std::to_string(Logic::gChoosenVertexEstimation) + " " +
+						std::to_string(Logic::gGraph.vertexList.size()) + " " +
+						std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(ChronoClock::now() - gMoveBeginTimePoint).count())
+						+ "ms"
+					);
+				}
+				else
+				{
+					str.append(std::string(" ") + Songs::songsList[Songs::songId].at((moveNumber - kShowHelloMessage - 2) / 1));
+				}
 			}
 			catch (...)
 			{
@@ -1490,18 +1867,19 @@ namespace Submitting
 // Mostly for testing (sandbox).
 void Preprocessing()
 {
-	for (int _1 = 0; _1 <= 10; _1++)
+	for (int8_t _1 = 0; _1 <= 10; _1++)
 	{
-		for (int _2 = 0; _2 <= 10; _2++)
+		for (int8_t _2 = 0; _2 <= 10; _2++)
 		{
-			for (int _3 = 0; _3 <= 10; _3++)
+			for (int8_t _3 = 0; _3 <= 10; _3++)
 			{
-				for (int _4 = 0; _4 <= 10; _4++)
+				for (int8_t _4 = 0; _4 <= 10; _4++)
 				{
 					auto inventory = IngredientsContainer{ _1, _2, _3, _4 };
 					if (Logic::CorrectInventory(inventory))
 					{
-						Logic::gInventoryPrecalculatedWorthEstimation[_1][_2][_3][_4] = Logic::InventoryWorthEstimation(inventory);
+						Logic::gInventoryPrecalculatedWorthEstimation[_1][_2][_3][_4] = Logic::IngredientsWorth(inventory);
+						Logic::gInventoryPrecalculatedLogWorthEstimation[_1][_2][_3][_4] = Logic::InventoryLogWorthEstimation(inventory);
 					}
 				}
 			}
